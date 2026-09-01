@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { SERVICE_CHARGES } from '../invoiceCalc.js';
 
 const money = (n) => 'Rs. ' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dt = (d) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
@@ -72,20 +73,22 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
   doc.fillColor(INK).fontSize(10).font('Helvetica-Bold').text('Service', 40, y);
   doc.fontSize(9).font('Helvetica').fillColor(MUTED).text(detailBits, 40, y + 15, { width: pageW });
 
-  // Charge heads table (only rows with a value are printed)
+  // Charge heads table — service-wise. For Hotel, list per-room rows; otherwise the
+  // stored charge heads with their service labels.
   y += 45;
-  const ch = order.invoiceCharges || {};
-  const chargeRows = [
-    ['Basic', ch.basic],
-    ['YQ Tax', ch.yqTax],
-    ['YR Tax', ch.yrTax],
-    ['K3 Tax', ch.k3Tax],
-    ['OC Tax', ch.ocTax],
-    ['Other Tax', ch.otherTax],
-    ['Processing Charges', ch.processingCharges],
-    ['Other Charges', ch.otherCharges],
-    ['Markup', ch.markup],
-  ].filter(([, v]) => Number(v) > 0);
+  const svc = (order.serviceCalcType || order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
+  const def = SERVICE_CHARGES[svc] || SERVICE_CHARGES.FLIGHT;
+  let chargeRows;
+  if (svc === 'HOTEL') {
+    chargeRows = (order.invoiceRooms || []).map((r, i) => [
+      `${r.roomType || 'Room'} (${Number(r.roomCount || r.rooms) || 0} × ${money(r.rate)}, ${Number(r.taxPercent) || 0}%)`,
+      r.roomTotal,
+    ]);
+  } else {
+    const ch = order.invoiceCharges || {};
+    const keys = (def.charges || []).concat(def.markups || []);
+    chargeRows = keys.map((k) => [def.labels[k] || k, ch[k]]).filter(([, v]) => Number(v) > 0);
+  }
 
   doc.rect(40, y, pageW, 20).fill('#f4f7fc');
   doc.fillColor(INK).fontSize(8).font('Helvetica-Bold');

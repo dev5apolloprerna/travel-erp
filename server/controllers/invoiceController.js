@@ -5,6 +5,17 @@ import Settings from '../models/Settings.js';
 import Service from '../models/Service.js';
 import { buildInvoicePdf, invoiceToBuffer } from '../utils/invoicePdf.js';
 import { sendMail } from '../utils/mailer.js';
+import { computeService } from '../invoiceCalc.js';
+import { SERVICE_CHARGES } from '../invoiceCalc.js';
+
+// Extract the common footer fields from a calculator result onto the order.
+const footerFields = (t) => ({
+  discountAmount: t.discountAmount,
+  tdsAmount: t.tdsAmount,
+  tcsAmount: t.tcsAmount,
+  govtTaxAmount: t.govtTaxAmount,
+  netInvoiceAmount: t.netInvoiceAmount,
+});
 
 // Load order + the party it's billed to (retail customer or B2B company)
 const loadInvoiceData = async (orderId) => {
@@ -127,7 +138,20 @@ export const computeInvoiceTotals = (charges = {}, footer = {}) => {
 export const getForInvoice = async (req, res) => {
   const data = await loadInvoiceData(req.params.orderId);
   if (!data) return res.status(404).json({ message: 'Order not found' });
-  res.json({ order: data.order, party: data.party });
+  // Tell the screen which service calculator + charge heads to render.
+  const serviceType = (data.order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
+  const def = SERVICE_CHARGES[serviceType] || SERVICE_CHARGES.FLIGHT;
+  res.json({
+    order: data.order,
+    party: data.party,
+    calc: {
+      serviceType,
+      isHotel: serviceType === 'HOTEL',
+      charges: def.charges || [],
+      markups: def.markups || [],
+      labels: def.labels || {},
+    },
+  });
 };
 
 // POST /api/invoices/:orderId/generate
@@ -137,16 +161,33 @@ export const generateInvoiceNo = async (req, res) => {
   const order = await Order.findById(req.params.orderId);
   if (!order) return res.status(404).json({ message: 'Order not found' });
 
-  const t = computeInvoiceTotals(req.body.charges || {}, req.body);
+  // Service-wise calculation. The service type comes from the order (not the client),
+  // so each service always uses its own formula. Backend recalculates before saving.
+  const serviceType = (order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
 
-  order.invoiceCharges = t.charges;
-  order.grossTotal = t.grossTotal;
-  order.discountAmount = t.discountAmount;
-  order.tdsAmount = t.tdsAmount;
-  order.govtTaxAmount = t.govtTaxAmount;
-  order.tcsAmount = t.tcsAmount;
-  order.netInvoiceAmount = t.netInvoiceAmount;
-  order.totalAmount = t.netInvoiceAmount;       // keep legacy total in sync for lists/portal
+  if (serviceType === 'HOTEL') {
+    // Hotel: rooms may be sent from the invoice screen, else fall back to booked rooms.
+    const rooms = Array.isArray(req.body.rooms) && req.body.rooms.length
+      ? req.body.rooms
+      : (order.services?.[0]?.rooms || []);
+    const t = computeService('HOTEL', { rooms, ...req.body });
+    order.invoiceRooms = t.perRoom.map((r, i) => ({ ...rooms[i], ...r }));
+    order.invoiceCharges = {};
+    order.grossTotal = t.grossTotal;
+    order.hotelTotalRoomAmount = t.totalRoomAmount;
+    order.hotelTotalTax = t.totalHotelTax;
+    Object.assign(order, footerFields(t));
+  } else {
+    const t = computeService(serviceType, { charges: req.body.charges || {}, ...req.body });
+    order.invoiceCharges = req.body.charges || {};
+    order.grossTotal = t.grossTotal;
+    order.chargesTotal = t.chargesTotal;
+    order.markupTotal = t.markupTotal;
+    Object.assign(order, footerFields(t));
+  }
+
+  order.serviceCalcType = serviceType;
+  order.totalAmount = order.netInvoiceAmount;   // keep legacy total in sync for lists/portal
   order.invoiceGenerated = true;
   if (req.body.invoiceNotes !== undefined) order.invoiceNotes = req.body.invoiceNotes;
   if (req.body.invoiceDate) order.invoiceDate = new Date(req.body.invoiceDate);

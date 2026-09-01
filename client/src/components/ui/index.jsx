@@ -2,20 +2,20 @@
 
 export function PageHeader({ eyebrow, title, actions }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
       <div>
-        {eyebrow && <div className="text-xs font-semibold uppercase tracking-widest text-accent-dark">{eyebrow}</div>}
-        <h1 className="mt-1 text-2xl font-bold text-ink">{title}</h1>
+        {eyebrow && <div className="eyebrow mb-1.5">{eyebrow}</div>}
+        <h1 className="text-[27px] font-extrabold leading-tight text-ink">{title}</h1>
       </div>
-      {actions && <div className="flex gap-2">{actions}</div>}
+      {actions && <div className="flex gap-2.5">{actions}</div>}
     </div>
   );
 }
 
 export function Card({ title, children, className = '' }) {
   return (
-    <div className={`card p-5 ${className}`}>
-      {title && <div className="mb-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">{title}</div>}
+    <div className={`card p-6 ${className}`}>
+      {title && <div className="mb-4 text-[10.5px] font-bold uppercase tracking-wider text-ink-muted">{title}</div>}
       {children}
     </div>
   );
@@ -102,14 +102,38 @@ export function Tabs({ tabs, active, onChange }) {
   );
 }
 
-// Modal shell
+// Modal shell — wireframe style with header/close and pop shadow.
 export function Modal({ title, children, onClose, maxWidth = 'max-w-lg' }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className={`card w-full ${maxWidth} p-6`} onClick={(e) => e.stopPropagation()}>
-        {title && <h2 className="mb-4 text-xl font-bold text-ink">{title}</h2>}
-        {children}
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-6" onClick={onClose}>
+      <div className={`w-full ${maxWidth} rounded-2xl bg-white shadow-pop`} onClick={(e) => e.stopPropagation()}>
+        {title && (
+          <div className="flex items-center justify-between border-b border-subtle px-6 py-5">
+            <h3 className="text-lg font-extrabold text-ink">{title}</h3>
+            <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-faint text-ink-muted hover:bg-subtle">×</button>
+          </div>
+        )}
+        <div className="p-6">{children}</div>
       </div>
     </div>
+  );
+}
+
+// Yes/No chip
+export function Chip({ yes, children }) {
+  return <span className={`chip ${yes ? 'chip-yes' : 'chip-no'}`}>{children || (yes ? 'Yes' : 'No')}</span>;
+}
+
+// Toggle switch (wireframe boolean control)
+export function Toggle({ checked, onChange, label }) {
+  return (
+    <label className="flex items-center gap-3 pt-1">
+      <span className="relative inline-block h-[22px] w-[38px]">
+        <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} className="peer sr-only" />
+        <span className="absolute inset-0 cursor-pointer rounded-full bg-line transition peer-checked:bg-brand"></span>
+        <span className="absolute left-[3px] top-[3px] h-4 w-4 rounded-full bg-white shadow transition peer-checked:translate-x-4"></span>
+      </span>
+      {label && <span className="text-sm text-ink-soft">{label}</span>}
+    </label>
   );
 }

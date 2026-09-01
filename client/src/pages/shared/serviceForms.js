@@ -7,7 +7,7 @@
 const FLIGHT = [
   ['airline', 'Airline'],
   ['fromStock', 'From Stock?', 'select', ['', 'Yes', 'No']],
-  ['pnrFrom', 'PNR From?', 'select', ['LCC/Net', 'GDS', 'Airline']],
+  ['pnrFrom', 'PNR From?', 'mref', 'cRS'],
   ['ticketNo', 'Ticket No.'],
   ['airlinePnr', 'Airline PNR'],
   ['crsPnr', 'CRS PNR'],
@@ -40,11 +40,10 @@ const RAILWAY = [
 // Bus — same layout as railway, worded for buses.
 const BUS = [
   ['bus', 'Bus'],
+  ['busType', 'Bus Type', 'mref', 'busType'],
   ['status', 'Status', 'select', ['Confirm', 'RAC', 'Waitlist', 'Tatkal']],
-  ['quota', 'Quota', 'select', ['General', 'Tatkal', 'Ladies', 'Senior Citizen', 'Premium Tatkal']],
   ['ticketNo', 'Ticket No.'],
   ['busPnr', 'Bus PNR'],
-  ['coachNo', 'Coach No.'],
   ['seatNo', 'Seat No.'],
   ['documentNo', 'Document No.'],
   ['travelDate', 'Travel Date', 'date'],
@@ -75,7 +74,6 @@ const VISA = [
 const CAB = [
   ['serviceProvider', 'Service Provider'],
   ['guestName', 'Name of Guest'],
-  ['voucherType', 'Voucher', 'select', ['Domestic', 'International']],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
   ['paymentType', 'Payment', 'select', ['Direct payment', 'Credit', 'Advance']],
   ['adults', 'Adults', 'number'],
@@ -84,7 +82,7 @@ const CAB = [
   ['startFrom', 'Start From', 'date'],
   ['endTo', 'End To', 'date'],
   ['days', 'No. of Days', 'number'],
-  ['vehicle', 'Vehicle'],
+  ['vehicle', 'Vehicle', 'mref', 'veh'],
   ['vehicleType', 'Type', 'select', ['AC', 'Non-AC']],
   ['tripType', 'Trip Type', 'select', ['Local', 'Outstation', 'Transfer']],
   ['noOfVehicles', 'No. of Vehicle', 'number'],
@@ -106,7 +104,6 @@ const CAB = [
 const HOTEL = [
   ['hotelName', 'Hotel Name'],
   ['guestName', 'Name of Guest'],
-  ['voucherType', 'Voucher', 'select', ['Domestic', 'International']],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
   ['adults', 'Adults', 'number'],
   ['children', 'Children', 'number'],

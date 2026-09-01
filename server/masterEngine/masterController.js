@@ -32,7 +32,7 @@ export const definition = (req, res) => {
   const def = defOr404(req.params.key, res);
   if (!def) return;
   res.json({
-    key: def.key, label: def.label, menu: def.menu, table: def.table,
+    key: def.key, label: def.label, menu: def.menu, table: def.table, pk: def.pk,
     listColumns: def.listColumns, fields: def.fields,
   });
 };

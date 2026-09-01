@@ -3,8 +3,8 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 
-// Dedicated Company Owner shell — its own sidebar built from the master catalog,
-// grouped by menu. Fully separate from the existing /app area.
+// Dedicated Company Owner shell — two-level sidebar (menu group → master items),
+// styled to the wireframe. Fully separate from the existing /app area.
 export default function OwnerLayout() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
@@ -16,7 +16,6 @@ export default function OwnerLayout() {
       const g = {};
       for (const m of r.data) { (g[m.menu] = g[m.menu] || []).push(m); }
       setGroups(g);
-      // open the first group by default
       const first = Object.keys(g)[0];
       if (first) setOpen({ [first]: true });
     });
@@ -24,48 +23,70 @@ export default function OwnerLayout() {
 
   const doLogout = () => { logout(); nav('/login/companyowner'); };
 
-  return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="flex h-screen w-64 flex-col border-r border-line bg-white">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <img src="/logo.png" alt="360 Travel Concierge" className="h-10 w-auto object-contain" />
-        </div>
-        <div className="px-5 pb-2 text-[10px] font-semibold uppercase tracking-widest text-accent-dark">Company Owner</div>
+  const itemCls = ({ isActive }) =>
+    `block rounded-lg px-[18px] py-2.5 text-[13.5px] transition ${
+      isActive ? 'bg-brand-light font-bold text-brand-dark' : 'font-medium text-ink-soft hover:bg-faint'
+    }`;
 
-        <nav className="flex-1 overflow-y-auto px-3 pb-6">
+  return (
+    <div className="flex min-h-screen">
+      <aside className="sticky top-0 flex h-screen w-[264px] min-w-[264px] flex-col border-r border-line bg-white">
+        {/* Brand */}
+        <div className="flex items-center gap-2.5 border-b border-subtle px-[18px] pb-4 pt-5">
+          <img src="/logo.png" alt="360 Travel Concierge" className="h-[38px] w-[38px] flex-none rounded-[10px] object-contain" />
+          <div className="leading-[1.05]">
+            <div className="text-[14.5px] font-extrabold tracking-wide text-ink">TRAVEL</div>
+            <div className="text-[11px] font-extrabold tracking-[1px] text-ink">CONCIERGE</div>
+            <div className="mt-px text-[9px] font-semibold italic text-brand">Anywhere Anytime</div>
+          </div>
+        </div>
+
+        <div className="px-[18px] pb-1.5 pt-3.5 text-[10.5px] font-bold uppercase tracking-wider text-ink-muted/70">
+          Company Owner
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 overflow-y-auto pb-2">
           <NavLink to="/owner" end className={({ isActive }) =>
-            `block rounded-lg px-3 py-2 text-sm ${isActive ? 'bg-brand text-white font-semibold' : 'text-ink-soft hover:bg-canvas'}`}>
+            `mx-2 mb-0.5 block rounded-lg px-[18px] py-2.5 text-[13.5px] transition ${
+              isActive ? 'bg-brand-light font-bold text-brand-dark' : 'font-medium text-ink-soft hover:bg-faint'
+            }`}>
             Dashboard
           </NavLink>
 
-          {Object.entries(groups).map(([menu, items]) => (
-            <div key={menu} className="mt-3">
-              <button onClick={() => setOpen((o) => ({ ...o, [menu]: !o[menu] }))}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-ink-muted hover:bg-canvas">
-                <span>{menu}</span>
-                <span className={`transition-transform ${open[menu] ? 'rotate-90' : ''}`}>›</span>
-              </button>
-              {open[menu] && (
-                <div className="mt-0.5 space-y-0.5 border-l border-line pl-2">
+          {Object.entries(groups).map(([menu, items]) => {
+            const isOpen = !!open[menu];
+            return (
+              <div key={menu}>
+                <button onClick={() => setOpen((o) => ({ ...o, [menu]: !o[menu] }))}
+                  className="mx-2 mt-0.5 flex w-[calc(100%-16px)] items-center justify-between rounded-lg px-[18px] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-ink-muted hover:bg-faint">
+                  <span>{menu}</span>
+                  <span className={`text-[11px] text-ink-muted/60 transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
+                </button>
+                <div className={`overflow-hidden transition-all ${isOpen ? 'max-h-[1600px]' : 'max-h-0'}`}>
                   {items.map((m) => (
-                    <NavLink key={m.key} to={`/owner/${m.key}`} className={({ isActive }) =>
-                      `block rounded-lg px-3 py-2 text-sm ${isActive ? 'bg-brand text-white font-semibold' : 'text-ink-soft hover:bg-canvas'}`}>
+                    <NavLink key={m.key} to={`/owner/${m.key}`}
+                      className={({ isActive }) =>
+                        `mx-2 block rounded-lg py-2.5 pl-[30px] pr-[18px] text-[13px] transition ${
+                          isActive ? 'bg-brand-light font-bold text-brand-dark' : 'font-medium text-ink-soft hover:bg-faint'
+                        }`}>
                       {m.label}
                     </NavLink>
                   ))}
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </nav>
 
-        <div className="border-t border-line px-4 py-3 text-xs text-ink-muted">
-          <div className="mb-2 truncate font-semibold text-ink-soft">{user?.name}</div>
+        {/* Footer */}
+        <div className="border-t border-subtle px-[18px] pb-4 pt-3.5">
+          <div className="mb-2 truncate text-[10.5px] font-bold uppercase tracking-wide text-ink-muted/70">{user?.name || 'Company Owner'}</div>
           <button onClick={doLogout} className="btn-ghost btn-sm w-full">Log out</button>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto px-8 py-6">
+      <main className="min-w-0 flex-1 px-10 pb-16 pt-9">
         <Outlet />
       </main>
     </div>

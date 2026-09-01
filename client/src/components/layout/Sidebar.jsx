@@ -39,13 +39,13 @@ export default function Sidebar() {
   const toggle = (section) => setOpen((prev) => ({ ...prev, [section]: !prev[section] }));
 
   const linkClass = ({ isActive }) =>
-    `block rounded-lg px-3 py-2 text-sm transition ${
-      isActive ? 'bg-brand text-white font-semibold shadow-sm' : 'text-ink-soft hover:bg-canvas'
+    `block rounded-lg px-[18px] py-2.5 text-[13.5px] transition ${
+      isActive ? 'bg-brand-light font-bold text-brand-dark' : 'font-medium text-ink-soft hover:bg-faint'
     }`;
 
   return (
-    <aside className="flex h-screen w-64 flex-col border-r border-line bg-white">
-      <div className="flex items-center gap-2 px-5 py-5">
+    <aside className="flex h-screen w-[264px] min-w-[264px] flex-col border-r border-line bg-white">
+      <div className="flex items-center gap-2.5 border-b border-subtle px-[18px] pb-4 pt-5">
         <img src="/logo.png" alt="360 Travel Concierge" className="h-10 w-auto object-contain" />
       </div>
 
@@ -73,8 +73,8 @@ export default function Sidebar() {
                 type="button"
                 onClick={() => toggle(group.section)}
                 aria-expanded={isOpen}
-                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-[10px] font-semibold uppercase tracking-widest transition ${
-                  hasActive ? 'text-brand' : 'text-ink-muted hover:bg-canvas'
+                className={`mt-0.5 flex w-full items-center justify-between rounded-lg px-[18px] py-2.5 text-[10.5px] font-bold uppercase tracking-wider transition ${
+                  hasActive ? 'text-brand' : 'text-ink-muted hover:bg-faint'
                 }`}
               >
                 <span>{group.section}</span>
@@ -88,9 +88,13 @@ export default function Sidebar() {
               </button>
 
               {isOpen && (
-                <div className="mt-0.5 space-y-0.5 border-l border-line pl-2">
+                <div className="mt-0.5">
                   {group.items.map((it) => (
-                    <NavLink key={it.key} to={it.to} end={it.end} className={linkClass}>
+                    <NavLink key={it.key} to={it.to} end={it.end}
+                      className={({ isActive }) =>
+                        `block rounded-lg py-2.5 pl-[30px] pr-[18px] text-[13px] transition ${
+                          isActive ? 'bg-brand-light font-bold text-brand-dark' : 'font-medium text-ink-soft hover:bg-faint'
+                        }`}>
                       {it.label}
                     </NavLink>
                   ))}

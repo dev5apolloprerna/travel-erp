@@ -25,7 +25,8 @@ export default function DepartmentMaster() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <div className="w-full max-w-5xl">
+ 
       <PageHeader eyebrow="FIT Masters" title="Department Master" />
       <Card title={editId ? 'Edit department' : 'Add department'} className="mb-4">
         <div className="flex items-end gap-2">

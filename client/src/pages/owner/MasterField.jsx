@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
-import { Field, Input, Select, Textarea } from '../../components/ui';
+import { Field, Input, Select, Textarea, Toggle } from '../../components/ui';
 
 // Renders one field based on its type. Foreign-key ('ref') fields load their options
 // from the related master and show a dropdown of names while storing the id.
@@ -27,10 +27,7 @@ export default function MasterField({ field, value, onChange }) {
   if (field.type === 'boolean') {
     return (
       <Field label={field.label}>
-        <label className="flex items-center gap-2 pt-1 text-sm text-ink-soft">
-          <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
-          Yes
-        </label>
+        <Toggle checked={!!value} onChange={onChange} label={value ? 'Yes' : 'No'} />
       </Field>
     );
   }

@@ -73,21 +73,19 @@ const orderSchema = new mongoose.Schema(
     gstTotal: { type: Number, default: 0 },
     totalAmount: { type: Number, default: 0 },     // subTotal + gstTotal
 
-    // ---- Invoice charge heads (entered manually at invoice generation) ----
-    // Mirrors the ePrompt air-ticket invoice. Unused heads stay 0 for non-flight services.
-    invoiceCharges: {
-      basic: { type: Number, default: 0 },
-      yqTax: { type: Number, default: 0 },
-      yrTax: { type: Number, default: 0 },
-      k3Tax: { type: Number, default: 0 },
-      ocTax: { type: Number, default: 0 },
-      otherTax: { type: Number, default: 0 },
-      processingCharges: { type: Number, default: 0 },
-      otherCharges: { type: Number, default: 0 },
-      markup: { type: Number, default: 0 },
-    },
+    // ---- Invoice charge heads (entered at invoice generation) ----
+    // Service-specific: Flight uses YQ/YR/K3…, Bus uses Tax I/Gateway…, etc.
+    // Flexible so each service stores only its own heads.
+    invoiceCharges: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // Hotel per-room breakdown (Rate × Rooms + Tax%).
+    invoiceRooms: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    serviceCalcType: { type: String, default: '' },     // which calculator was used
+    chargesTotal: { type: Number, default: 0 },
+    markupTotal: { type: Number, default: 0 },
+    hotelTotalRoomAmount: { type: Number, default: 0 },
+    hotelTotalTax: { type: Number, default: 0 },
     // ---- Invoice footer ----
-    grossTotal: { type: Number, default: 0 },       // sum of the charge heads above
+    grossTotal: { type: Number, default: 0 },       // service gross (charges + markup, or hotel grand)
     discountAmount: { type: Number, default: 0 },
     tdsAmount: { type: Number, default: 0 },
     govtTaxAmount: { type: Number, default: 0 },
