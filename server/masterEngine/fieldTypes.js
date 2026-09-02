@@ -13,6 +13,10 @@ const PREFIX = [
 ];
 
 export const typeOf = (col) => {
+  // Remark / Remarks / Notes fields render as a textarea, wherever they appear (#5).
+  if (/(Remark|Remarks|Notes|Description|Address)$/.test(col.replace(/^(int|str|bit|dec|flt|mny|dt|dat|img|txt|uni)/, ''))) {
+    return 'textarea';
+  }
   for (const [p, t] of PREFIX) if (col.startsWith(p)) return t;
   return 'text';
 };
@@ -23,6 +27,9 @@ const ACRONYMS = ['ID', 'RBI', 'ISO', 'GST', 'PAN', 'TAN', 'CIN', 'KYC', 'RM', '
 
 export const labelOf = (col) => {
   let s = col.replace(/^(int|str|bit|dec|flt|mny|dt|dat|img|txt|uni)/, '');
+  // A foreign-key column ends in "ID" (e.g. intCityID) — drop the trailing ID so the
+  // user sees the entity name ("City"), not "City ID". Keep mid-name acronyms intact.
+  s = s.replace(/ID$/, '');
   // protect acronyms, then split camelCase, then restore
   ACRONYMS.forEach((a, i) => { s = s.replace(new RegExp(a, 'g'), `\u0000${i}\u0000`); });
   s = s.replace(/([A-Z])/g, ' $1');

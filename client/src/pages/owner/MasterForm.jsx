@@ -49,7 +49,7 @@ export default function MasterForm() {
 
       {error && <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
-      <div className="mt-5 max-w-3xl rounded-xl2 border border-line bg-white p-7 shadow-card">
+      <div className="mt-5 w-full rounded-xl2 border border-line bg-white p-4 shadow-card sm:p-7">
         <p className="mb-4 rounded-lg bg-faint px-3 py-2.5 text-[12px] text-ink-muted">
           <strong className="font-mono text-ink-soft">{def.pk || 'ID'}</strong> — {editing
             ? 'generated automatically, not editable.'
@@ -58,14 +58,14 @@ export default function MasterForm() {
         <div className="grid gap-x-[18px] gap-y-4 sm:grid-cols-2">
           {def.fields.map((f) => (
             <div key={f.key} className={f.type === 'textarea' ? 'sm:col-span-2' : ''}>
-              <MasterField field={f} value={form[f.key]} onChange={set(f.key)} />
+              <MasterField field={f} value={form[f.key]} onChange={set(f.key)} excludeId={id} />
             </div>
           ))}
         </div>
       </div>
 
       {/* Fixed bottom action bar (wireframe) */}
-      <div className="fixed bottom-0 right-0 left-0 z-40 flex justify-end gap-2.5 border-t border-line bg-white px-10 py-3.5 shadow-[0_-2px_10px_rgba(16,24,40,.08)] md:left-[264px]">
+      <div className="fixed bottom-0 right-0 left-0 z-40 flex justify-end gap-2.5 border-t border-line bg-white px-4 py-3.5 shadow-[0_-2px_10px_rgba(16,24,40,.08)] sm:px-10 md:left-[264px]">
         <button onClick={backToList} className="btn-ghost">Cancel</button>
         <button onClick={save} disabled={saving} className="btn-primary">
           {saving ? 'Saving…' : `Save ${def.label}`}

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Table, EmptyRow, RowActions, Badge, Modal, Field, Input } from '../../components/ui';
+import PasswordInput from '../../components/ui/PasswordInput';
 
 export default function EmployeeList() {
   const confirm = useConfirm();
@@ -92,7 +93,7 @@ export default function EmployeeList() {
       {pwUser && (
         <Modal title={`Reset password — ${pwUser.name}`} onClose={() => setPwUser(null)}>
           <Field label="New password (min 6 characters)">
-            <Input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+            <PasswordInput  value={newPw} onChange={(e) => setNewPw(e.target.value)} />
           </Field>
           <p className="mt-2 text-xs text-ink-muted">The member can change it themselves later from Account → Change Password.</p>
           <div className="mt-4 flex justify-end gap-2">

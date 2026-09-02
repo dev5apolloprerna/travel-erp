@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Input } from '../../components/ui';
+import PasswordInput from '../../components/ui/PasswordInput';
 
 // One component drives all four login URLs via :portal param.
 const PORTALS = {
@@ -64,7 +65,7 @@ export default function Login() {
             </div>
             <div>
               <label className="label">Password</label>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+              <PasswordInput  value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
             </div>
           </div>
 

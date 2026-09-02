@@ -6,7 +6,7 @@ import api from '../../api/client';
 
 const STORAGE_KEY = 'sidebarOpenSections';
 
-export default function Sidebar() {
+export default function Sidebar({ drawer = false, onClose }) {
   const { user } = useAuth();
   const { pathname } = useLocation();
   const groups = visibleMenu(user);
@@ -44,7 +44,7 @@ export default function Sidebar() {
     }`;
 
   return (
-    <aside className="flex h-screen w-[264px] min-w-[264px] flex-col border-r border-line bg-white">
+    <aside className={`fixed inset-y-0 left-0 z-40 flex h-screen w-[264px] min-w-[264px] flex-col border-r border-line bg-white transition-transform md:static md:translate-x-0 ${drawer ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="flex items-center gap-2.5 border-b border-subtle px-[18px] pb-4 pt-5">
         <img src="/logo.png" alt="360 Travel Concierge" className="h-10 w-auto object-contain" />
       </div>

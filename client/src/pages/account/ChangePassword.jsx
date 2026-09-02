@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import api from '../../api/client';
 import { PageHeader, Card, Field, Input } from '../../components/ui';
+import PasswordInput from '../../components/ui/PasswordInput';
 
 /**
  * Change own password. Works for every role — Super Admin, Employee,
@@ -39,9 +40,9 @@ export default function ChangePassword({ bare = false }) {
         </div>
       )}
       <div className="space-y-3">
-        <Field label="Current password"><Input type="password" value={form.currentPassword} onChange={set('currentPassword')} /></Field>
-        <Field label="New password"><Input type="password" value={form.newPassword} onChange={set('newPassword')} /></Field>
-        <Field label="Confirm new password"><Input type="password" value={form.confirmPassword} onChange={set('confirmPassword')} /></Field>
+        <Field label="Current password"><PasswordInput  value={form.currentPassword} onChange={set('currentPassword')} /></Field>
+        <Field label="New password"><PasswordInput  value={form.newPassword} onChange={set('newPassword')} /></Field>
+        <Field label="Confirm new password"><PasswordInput  value={form.confirmPassword} onChange={set('confirmPassword')} /></Field>
         <button onClick={submit} disabled={busy} className="btn-primary w-full">
           {busy ? 'Saving…' : 'Change password'}
         </button>

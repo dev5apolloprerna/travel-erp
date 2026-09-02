@@ -25,7 +25,7 @@ export default function ClusterMaster() {
   };
 
   return (
-    <div className="w-full max-w-5xl">
+    <div className="max-w-3xl">
       <PageHeader eyebrow="FIT Masters" title="Cluster Master" />
       <Card title={editId ? 'Edit cluster' : 'Add cluster'} className="mb-4">
         <div className="flex items-end gap-2">

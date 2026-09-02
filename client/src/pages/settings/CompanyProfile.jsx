@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import { PageHeader, Card, Field, Input, Select, Textarea, Tabs } from '../../components/ui';
+import PasswordInput from '../../components/ui/PasswordInput';
 
 export default function CompanyProfile() {
   const [tab, setTab] = useState('company');
@@ -98,7 +99,7 @@ export default function CompanyProfile() {
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Razorpay Key ID"><Input value={form.razorpayKeyId || ''} onChange={set('razorpayKeyId')} placeholder="rzp_live_..." /></Field>
-              <Field label="Razorpay Key Secret"><Input type="password" value={form.razorpayKeySecret || ''} onChange={set('razorpayKeySecret')} placeholder="********" /></Field>
+              <Field label="Razorpay Key Secret"><PasswordInput  value={form.razorpayKeySecret || ''} onChange={set('razorpayKeySecret')} placeholder="********" /></Field>
               <Field label="Domestic currency"><Input value={form.currencyDomestic || 'INR'} onChange={set('currencyDomestic')} /></Field>
             </div>
           </div>
@@ -110,8 +111,8 @@ export default function CompanyProfile() {
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Stripe Publishable Key"><Input value={form.stripePublishableKey || ''} onChange={set('stripePublishableKey')} placeholder="pk_live_..." /></Field>
-              <Field label="Stripe Secret Key"><Input type="password" value={form.stripeSecretKey || ''} onChange={set('stripeSecretKey')} placeholder="********" /></Field>
-              <Field label="Stripe Webhook Secret"><Input type="password" value={form.stripeWebhookSecret || ''} onChange={set('stripeWebhookSecret')} placeholder="whsec_..." /></Field>
+              <Field label="Stripe Secret Key"><PasswordInput  value={form.stripeSecretKey || ''} onChange={set('stripeSecretKey')} placeholder="********" /></Field>
+              <Field label="Stripe Webhook Secret"><PasswordInput  value={form.stripeWebhookSecret || ''} onChange={set('stripeWebhookSecret')} placeholder="whsec_..." /></Field>
               <Field label="International currency"><Input value={form.currencyInternational || 'USD'} onChange={set('currencyInternational')} /></Field>
             </div>
           </div>
@@ -132,7 +133,7 @@ export default function CompanyProfile() {
             <Field label="SMTP host"><Input value={form.smtpHost || ''} onChange={set('smtpHost')} placeholder="smtp.hostinger.com" /></Field>
             <Field label="SMTP port"><Input type="number" value={form.smtpPort || 587} onChange={set('smtpPort')} /></Field>
             <Field label="SMTP username"><Input value={form.smtpUser || ''} onChange={set('smtpUser')} /></Field>
-            <Field label="SMTP password"><Input type="password" value={form.smtpPassword || ''} onChange={set('smtpPassword')} placeholder="********" /></Field>
+            <Field label="SMTP password"><PasswordInput  value={form.smtpPassword || ''} onChange={set('smtpPassword')} placeholder="********" /></Field>
             <Field label="From name"><Input value={form.smtpFromName || ''} onChange={set('smtpFromName')} /></Field>
             <Field label="From email"><Input value={form.smtpFromEmail || ''} onChange={set('smtpFromEmail')} /></Field>
             <div className="sm:col-span-2">

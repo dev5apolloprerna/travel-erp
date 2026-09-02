@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../api/client';
 import { PageHeader, Card, Field, Input, Select } from '../../components/ui';
 import { MENU } from '../../menuConfig';
+import PasswordInput from '../../components/ui/PasswordInput';
 
 const MODULES = ['RETAIL', 'B2B', 'FIT'];
 // menu keys the admin can grant (flatten menu config, skip dashboard)
@@ -60,7 +61,7 @@ export default function EmployeeForm() {
           <Field label="Full name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
           <Field label={editing ? 'New password (leave blank to keep)' : 'Password'}>
-            <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <PasswordInput  value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           </Field>
           <Field label="Employee type (can be both)">
             <div className="flex gap-2">

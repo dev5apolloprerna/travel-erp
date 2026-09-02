@@ -31,13 +31,24 @@ export const createCustomer = async (req, res) => {
     name, mobile, email, city, state, stateCode, gstNumber, address, createdBy: req.user._id,
   });
 
-  // auto-create a retail customer portal login + (simulated) email
+  // auto-create (or update) a retail customer portal login + (simulated) email.
+  // If a User with this email already exists, update its password so the emailed
+  // credentials always work (previously the save error was silently ignored, which
+  // left the old password in place and broke login).
   const tempPass = genPassword();
-  const portalUser = new User({
-    name, email, role: ROLES.RETAIL_CUSTOMER, customerId: customer._id,
-  });
+  const loginEmail = (email || '').toLowerCase().trim();
+  let portalUser = await User.findOne({ email: loginEmail });
+  if (!portalUser) {
+    portalUser = new User({ name, email: loginEmail, role: ROLES.RETAIL_CUSTOMER, customerId: customer._id });
+  } else {
+    // keep it pointed at this customer + retail role
+    portalUser.name = name || portalUser.name;
+    portalUser.role = ROLES.RETAIL_CUSTOMER;
+    portalUser.customerId = customer._id;
+    portalUser.isActive = true;
+  }
   await portalUser.setPassword(tempPass);
-  await portalUser.save().catch(() => {}); // ignore if email already a user
+  await portalUser.save();
 
   const loginUrl = `${process.env.CLIENT_URL}/login/retail`;
   // Try to actually email the credentials (falls back gracefully if SMTP isn't set up yet)
@@ -82,7 +93,13 @@ export const listOrders = async (req, res) => {
   const filter = { module: 'RETAIL' };
   // employees see only their own orders (admin sees all)
   if (req.user.role === ROLES.EMPLOYEE) filter.createdBy = req.user._id;
-  if (req.query.customerId) filter.customerId = req.query.customerId;
+  // a logged-in retail customer only ever sees their own bookings — enforce it
+  // server-side (don't rely on the client passing the right customerId).
+  if (req.user.role === ROLES.RETAIL_CUSTOMER) {
+    filter.customerId = req.user.customerId;
+  } else if (req.query.customerId) {
+    filter.customerId = req.query.customerId;
+  }
   const orders = await Order.find(filter).populate('customerId', 'name email').sort('-createdAt');
   res.json(orders);
 };
