@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 export const connectDB = async () => {
   try {
     console.log('🔌 Attempting to connect to MongoDB...');
-    const uri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/travel_erp';
+    const uri = process.env.MONGO_URI;
     
     // Log connection details (hide password)
     const sanitizedUri = uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
