@@ -10,6 +10,8 @@ const r = Router();
 
 // Destinations
 r.get('/navigation', p.navigationTree);
+r.get('/destination_categories', p.destinationCategoriesList);
+r.get('/destinations_page', p.destinationsPage);
 r.get('/destinations', p.listDestinations);
 r.get('/destinations/:slug', p.getDestination);
 
@@ -21,6 +23,9 @@ r.get('/packages/:slug', p.getPackage);
 r.get('/faqs', p.listFaqs);
 r.get('/testimonials', p.listTestimonials);
 r.get('/company', p.companyInfo);
+
+// Inquiry (contact form)
+r.post('/inquiry', p.createInquiry);
 
 // Booking + payment
 r.post('/bookings', wb.createBooking);

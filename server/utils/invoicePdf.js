@@ -79,7 +79,11 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
   const svc = (order.serviceCalcType || order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
   const def = SERVICE_CHARGES[svc] || SERVICE_CHARGES.FLIGHT;
   let chargeRows;
-  if (svc === 'HOTEL') {
+  if (Array.isArray(order.pdfLines)) {
+    // Generic line-item source (e.g. Supplier Invoices, req #5) — reuses this whole
+    // template/format; only the row source differs from the service-charge path.
+    chargeRows = order.pdfLines.map((l) => [l.description || 'Item', l.amount]);
+  } else if (svc === 'HOTEL') {
     chargeRows = (order.invoiceRooms || []).map((r, i) => [
       `${r.roomType || 'Room'} (${Number(r.roomCount || r.rooms) || 0} × ${money(r.rate)}, ${Number(r.taxPercent) || 0}%)`,
       r.roomTotal,

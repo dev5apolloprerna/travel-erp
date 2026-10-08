@@ -23,7 +23,6 @@ const tourPackageSchema = new mongoose.Schema(
 
     // Where it goes
     categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'DestinationCategory' },
-    subCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'DestinationSubCategory' },
     destinationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Destination' },
 
     // Domestic vs International decides the payment gateway on the website:
@@ -60,8 +59,10 @@ const tourPackageSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
 
     seoTitle: { type: String, default: '' },
-    seoDescription: { type: String, default: '' },
-    seoKeywords: { type: String, default: '' },
+    seoDescription: { type: String, default: '' },   // rich text (HTML)
+    seoKeywords: { type: String, default: '' },       // rich text (HTML)
+    seoHead: { type: String, default: '' },           // rich text (HTML)
+    seoBody: { type: String, default: '' },           // rich text (HTML)
   },
   { timestamps: true }
 );

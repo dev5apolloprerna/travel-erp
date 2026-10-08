@@ -1,4 +1,5 @@
 import './masterOverrides.js';            // apply v17 overrides (enums, Company FKs, Group parent)
+import './masterDetails.js';              // v25: detail masters + additive Account/Hotel fields
 import { MASTERS } from './masterDefs.js';
 import { modelForMaster } from './MasterRecord.js';
 
@@ -55,9 +56,17 @@ const resolveRefs = async (def, rows) => {
 
 // GET /api/owner/masters
 export const catalog = (req, res) => {
-  res.json(Object.values(MASTERS).map((m) => ({
-    key: m.key, label: m.label, menu: m.menu, table: m.table,
-  })));
+  const masters = Object.values(MASTERS)
+    .filter((m) => !m.hidden)   // v25: detail masters (family/employee/room/season) are not standalone
+    .map((m) => ({ key: m.key, label: m.label, menu: m.menu, table: m.table }));
+  // v31: operational entries surfaced under the Company menu (sidebar), reusing the existing
+  // routed pages. They are not master collections (marked `virtual`); the dashboard filters
+  // them out of its master-card grid, so they appear only in the Company menu.
+  const companyMenu = [
+    { key: 'retail/orders', label: 'Order & Invoices', menu: 'Company', virtual: true },
+    { key: 'admin/employees', label: 'Employees', menu: 'Company', virtual: true },
+  ];
+  res.json([...masters, ...companyMenu]);
 };
 
 // GET /api/owner/masters/:key/def
@@ -76,6 +85,10 @@ export const list = async (req, res) => {
   if (!def) return;
   const Model = modelForMaster(def.key);
   const filter = {};
+  // v25: detail masters are scoped to their parent head (?parentId=<headId>).
+  if (def.parentField && req.query.parentId) {
+    filter[def.parentField] = req.query.parentId;
+  }
   if (req.query.search && def.titleField) {
     filter[def.titleField] = new RegExp(String(req.query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   }

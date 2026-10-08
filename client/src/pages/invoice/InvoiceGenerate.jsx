@@ -4,6 +4,7 @@ import api from '../../api/client';
 import { PageHeader, Card, Field, Input, money } from '../../components/ui';
 import { formFor } from '../shared/serviceForms';
 import { chargeCalc, hotelCalc } from './invoiceCalc';
+import { useShellBase } from '../../hooks/useShellBase';
 
 const FOOTER = [
   ['discountAmount', 'Discount Amount', '-'],
@@ -16,6 +17,7 @@ const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 export default function InvoiceGenerate() {
   const { orderId } = useParams();
   const nav = useNavigate();
+  const base = useShellBase();
 
   const [order, setOrder] = useState(null);
   const [party, setParty] = useState(null);
@@ -96,13 +98,19 @@ export default function InvoiceGenerate() {
 
   const line = order.services?.[0] || {};
   const backTo = order.module === 'B2B'
-    ? (order.companyId ? `/app/b2b/companies/${order.companyId}?tab=orders` : '/app/b2b/companies')
-    : order.module === 'FIT' ? '/app/fit/orders' : '/app/retail/orders';
+    ? (order.companyId ? `${base}/b2b/companies/${order.companyId}?tab=orders` : `${base}/b2b/companies`)
+    : order.module === 'FIT' ? `${base}/fit/orders` : `${base}/retail/orders`;
 
   return (
     <div className="max-w-4xl">
       <PageHeader eyebrow={`${order.module === 'FIT' ? 'Society' : order.module} · ${order.orderNo}`}
         title={`Generate invoice — ${calc.serviceType}`} />
+      {/* Sales vs Purchase direction (req #4) — a customer invoice is a SALES invoice. */}
+      <div className="-mt-3 mb-4">
+        <span className="inline-flex rounded-full bg-accent-light px-2.5 py-0.5 text-xs font-semibold text-accent-dark">
+          {(order.invoiceDirection || 'SALES') === 'PURCHASE' ? 'Purchase Invoice' : 'Sales Invoice'}
+        </span>
+      </div>
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
       {done ? (

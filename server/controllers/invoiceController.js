@@ -5,6 +5,7 @@ import Settings from '../models/Settings.js';
 import Service from '../models/Service.js';
 import { buildInvoicePdf, invoiceToBuffer } from '../utils/invoicePdf.js';
 import { sendMail } from '../utils/mailer.js';
+import { ownsOrg } from '../middleware/auth.js';
 import { computeService } from '../invoiceCalc.js';
 import { SERVICE_CHARGES } from '../invoiceCalc.js';
 
@@ -60,7 +61,7 @@ const ensureInvoiceNo = async (order) => {
 // GET /api/invoices/:orderId/pdf  -> streams the PDF
 export const downloadInvoice = async (req, res) => {
   const data = await loadInvoiceData(req.params.orderId);
-  if (!data) return res.status(404).json({ message: 'Order not found' });
+  if (!data || !ownsOrg(data.order, req)) return res.status(404).json({ message: 'Order not found' });
 
   await ensureInvoiceNo(data.order);
 
@@ -72,7 +73,7 @@ export const downloadInvoice = async (req, res) => {
 // GET /api/invoices/:orderId/preview -> inline PDF (opens in browser tab)
 export const previewInvoice = async (req, res) => {
   const data = await loadInvoiceData(req.params.orderId);
-  if (!data) return res.status(404).json({ message: 'Order not found' });
+  if (!data || !ownsOrg(data.order, req)) return res.status(404).json({ message: 'Order not found' });
 
   await ensureInvoiceNo(data.order);
   res.setHeader('Content-Type', 'application/pdf');
@@ -83,7 +84,7 @@ export const previewInvoice = async (req, res) => {
 // POST /api/invoices/:orderId/email  { to? }
 export const emailInvoice = async (req, res) => {
   const data = await loadInvoiceData(req.params.orderId);
-  if (!data) return res.status(404).json({ message: 'Order not found' });
+  if (!data || !ownsOrg(data.order, req)) return res.status(404).json({ message: 'Order not found' });
 
   const { order, party, settings } = data;
   await ensureInvoiceNo(order);
@@ -137,7 +138,7 @@ export const computeInvoiceTotals = (charges = {}, footer = {}) => {
 // GET /api/invoices/:orderId  -> order + party (works for retail/b2b/society)
 export const getForInvoice = async (req, res) => {
   const data = await loadInvoiceData(req.params.orderId);
-  if (!data) return res.status(404).json({ message: 'Order not found' });
+  if (!data || !ownsOrg(data.order, req)) return res.status(404).json({ message: 'Order not found' });
   // Tell the screen which service calculator + charge heads to render.
   const serviceType = (data.order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
   const def = SERVICE_CHARGES[serviceType] || SERVICE_CHARGES.FLIGHT;
@@ -159,7 +160,7 @@ export const getForInvoice = async (req, res) => {
 // Saves the charge heads, computes totals, assigns the service-prefixed number.
 export const generateInvoiceNo = async (req, res) => {
   const order = await Order.findById(req.params.orderId);
-  if (!order) return res.status(404).json({ message: 'Order not found' });
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
 
   // Service-wise calculation. The service type comes from the order (not the client),
   // so each service always uses its own formula. Backend recalculates before saving.
@@ -189,6 +190,10 @@ export const generateInvoiceNo = async (req, res) => {
   order.serviceCalcType = serviceType;
   order.totalAmount = order.netInvoiceAmount;   // keep legacy total in sync for lists/portal
   order.invoiceGenerated = true;
+  // Direction is determined server-side, never from the client (req #4/#5). A customer Order
+  // invoice is a SALES invoice (Company Owner / 360 selling to a customer); the 360 ← Main Company
+  // PURCHASE invoice is the separate, Super-Admin-only SupplierInvoice module.
+  order.invoiceDirection = 'SALES';
   if (req.body.invoiceNotes !== undefined) order.invoiceNotes = req.body.invoiceNotes;
   if (req.body.invoiceDate) order.invoiceDate = new Date(req.body.invoiceDate);
 

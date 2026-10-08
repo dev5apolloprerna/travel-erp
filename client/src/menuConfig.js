@@ -2,6 +2,9 @@
 // module (if set) also gates by employee.modules.
 export const MENU = [
   { section: null, items: [{ key: 'dashboard', label: 'Dashboard', to: '/app', end: true }] },
+  // Super Admin → Company Owner management (list/create/edit). This opens the management
+  // page INSIDE the Super Admin panel — it no longer links to the Company Owner dashboard (#1).
+  { section: 'Company Owner', items: [{ key: 'admin-company-owners', label: 'Company Owners', to: '/app/admin/company-owners' }] },
   {
     section: 'Retail', module: 'RETAIL',
     items: [
@@ -49,6 +52,7 @@ export const MENU = [
       { key: 'cms-packages', label: 'Tour Packages', to: '/app/cms/packages' },
       { key: 'cms-content', label: 'FAQ & Testimonials', to: '/app/cms/content' },
       { key: 'cms-bookings', label: 'Website Bookings', to: '/app/cms/bookings' },
+      { key: 'cms-inquiries', label: 'Inquiries', to: '/app/cms/inquiries' },
     ],
   },
   {
@@ -56,6 +60,8 @@ export const MENU = [
     items: [
       { key: 'admin-services', label: 'Service Master', to: '/app/masters/services' },
       { key: 'admin-employees', label: 'Team / Employees', to: '/app/admin/employees' },
+      { key: 'admin-main-companies', label: 'Main Companies', to: '/app/org/main-companies' },
+      { key: 'admin-supplier-invoices', label: 'Supplier Invoices', to: '/app/org/supplier-invoices' },
       { key: 'admin-settings', label: 'Company Profile', to: '/app/settings/company' },
     ],
   },
@@ -70,13 +76,18 @@ export const MENU = [
 
 // Menus every logged-in staff user can reach regardless of granted rights.
 const ALWAYS_ALLOWED = ['dashboard', 'my-profile', 'change-password', 'hr-my-leave', 'hr-my-salary'];
+// The Company Owner runs entirely in its own /owner shell (not /app), so this list is only a
+// safety fallback. Main Companies / Supplier Invoices are intentionally excluded (req #4/#6).
+const CO_ALLOWED = ['retail-customers', 'retail-orders', 'b2b-companies', 'admin-employees'];
 
 // Given a user, return menu with only the sections/items they may see.
 export function visibleMenu(user) {
   if (!user) return [];
   const all = user.role === 'SUPER_ADMIN' || (user.menus || []).includes('ALL');
-  const canModule = (m) => !m || all || (user.modules || []).includes(m);
-  const canItem = (key) => all || ALWAYS_ALLOWED.includes(key) || (user.menus || []).includes(key);
+  const isCO = user.role === 'COMPANY_OWNER';
+  // Company Owner may use the Retail and B2B modules (Society/FIT excluded, per decision).
+  const canModule = (m) => !m || all || (isCO && (m === 'RETAIL' || m === 'B2B')) || (user.modules || []).includes(m);
+  const canItem = (key) => all || ALWAYS_ALLOWED.includes(key) || (isCO && CO_ALLOWED.includes(key)) || (user.menus || []).includes(key);
 
   return MENU
     .map((group) => {

@@ -7,13 +7,15 @@ export default function OwnerDashboard() {
   const [masters, setMasters] = useState([]);
   useEffect(() => { api.get('/owner/masters').then((r) => setMasters(r.data)); }, []);
 
+  // Order & Invoices and Employees are reached from the Company menu in the sidebar, not from
+  // dashboard buttons (req #1/#2), so the operational (virtual) entries are left out of the cards.
   const byMenu = {};
-  for (const m of masters) (byMenu[m.menu] = byMenu[m.menu] || []).push(m);
+  for (const m of masters) if (!m.virtual) (byMenu[m.menu] = byMenu[m.menu] || []).push(m);
 
   return (
     <div>
       <PageHeader eyebrow="Company Owner" title="Masters" />
-      <p className="mb-5 text-sm text-ink-soft">All master data for your company. Choose a master to view, add, edit or delete its records.</p>
+      <p className="mb-5 text-sm text-ink-soft">All master data for your company. Choose a master to view, add, edit or delete its records. Use the <strong>Company</strong> menu for Order &amp; Invoices and Employees.</p>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Object.entries(byMenu).map(([menu, items]) => (
           <Card key={menu} title={menu}>

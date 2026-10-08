@@ -4,7 +4,7 @@ import { modelForMaster } from '../masterEngine/MasterRecord.js';
 // Staff-facing read-only dropdown options for a master collection.
 // Used by booking screens (employee role) to populate dropdowns like CRS, Bus Type, Vehicle.
 // Only whitelisted masters are exposed, so this doesn't open the whole Company-Owner area.
-const STAFF_READABLE = new Set(['cRS', 'busType', 'veh', 'vehType', 'vehModel', 'vehBrand']);
+const STAFF_READABLE = new Set(['cRS', 'busType', 'veh', 'vehType', 'vehModel', 'vehBrand', 'property', 'mealPlan', 'quota']);
 
 export const masterOptions = async (req, res) => {
   const key = req.params.key;

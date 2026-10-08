@@ -5,7 +5,9 @@ import { ROLES } from '../models/User.js';
 import { upload, toFolder } from '../utils/upload.js';
 
 const r = Router();
-const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN);
+// Company Owner can use the B2B module too (req #5/#6); isolation is enforced per-record
+// in the controller (scopeToOrg / ownsOrg), so a CO only ever sees their own company's data.
+const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER);
 
 r.get('/companies', protect, staff, c.listCompanies);
 r.post('/companies', protect, staff, c.createCompany);

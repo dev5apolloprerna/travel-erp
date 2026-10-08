@@ -4,6 +4,7 @@ import api from '../../api/client';
 import { PageHeader, Card, Tabs } from '../../components/ui';
 import DocumentManager from '../../components/ui/DocumentManager';
 import CustomerFields, { emptyCustomer } from './CustomerFields';
+import { useShellBase } from '../../hooks/useShellBase';
 
 const blank = emptyCustomer;
 
@@ -11,6 +12,7 @@ export default function CustomerForm() {
   const { id } = useParams();
   const editing = Boolean(id);
   const nav = useNavigate();
+  const base = useShellBase();
 
   const [tab, setTab] = useState('details');
   const [form, setForm] = useState(blank);
@@ -62,8 +64,8 @@ export default function CustomerForm() {
             <div className="flex justify-between"><dt className="text-ink-muted">Password</dt><dd className="font-mono font-medium">{credentials.password}</dd></div>
           </dl>
           <div className="mt-5 flex gap-2">
-            <button onClick={() => nav('/app/retail/orders/new')} className="btn-primary">Create booking</button>
-            <button onClick={() => nav('/app/retail/customers')} className="btn-ghost">Back to list</button>
+            <button onClick={() => nav(`${base}/retail/orders/new`)} className="btn-primary">Create booking</button>
+            <button onClick={() => nav(`${base}/retail/customers`)} className="btn-ghost">Back to list</button>
           </div>
         </Card>
       </div>
@@ -84,7 +86,7 @@ export default function CustomerForm() {
       </p>
       <div className="mt-5 flex gap-2">
         <button onClick={save} className="btn-primary">{editing ? 'Save changes' : 'Save customer'}</button>
-        <button onClick={() => nav('/app/retail/customers')} className="btn-ghost">Cancel</button>
+        <button onClick={() => nav(`${base}/retail/customers`)} className="btn-ghost">Cancel</button>
       </div>
     </Card>
   );

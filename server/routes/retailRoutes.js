@@ -5,7 +5,10 @@ import { ROLES } from '../models/User.js';
 import { upload, toFolder } from '../utils/upload.js';
 
 const r = Router();
-const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN);
+const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER);
+// A logged-in retail customer may view their OWN orders/invoices from their portal.
+// listOrders/getOrder force the filter to their own customerId, so this is safe.
+const staffOrCustomer = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER, ROLES.RETAIL_CUSTOMER);
 
 r.get('/customers', protect, staff, c.listCustomers);
 r.post('/customers', protect, staff, c.createCustomer);
@@ -16,10 +19,11 @@ r.delete('/customers/:id', protect, staff, c.deleteCustomer);
 r.post('/customers/:id/documents', protect, staff, toFolder('customers'), upload.single('file'), c.addCustomerDocument);
 r.delete('/customers/:id/documents/:docId', protect, staff, c.deleteCustomerDocument);
 
-r.get('/orders', protect, staff, c.listOrders);
+r.get('/orders', protect, staffOrCustomer, c.listOrders);   // customers see only their own (controller-enforced)
 r.post('/orders', protect, staff, c.createOrder);
-r.get('/orders/:id', protect, c.getOrder);
+r.get('/orders/:id', protect, staffOrCustomer, c.getOrder);
 r.put('/orders/:id', protect, staff, c.updateOrder);
+r.put('/orders/:id/cancel', protect, staff, c.cancelOrder);   // only after invoice generated (req #2)
 r.delete('/orders/:id', protect, staff, c.deleteOrder);
 r.post('/orders/:id/payments', protect, c.addPayment);
 export default r;

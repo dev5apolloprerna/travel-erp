@@ -27,6 +27,9 @@ const companySchema = new mongoose.Schema(
     stateCode: { type: String, default: '' },
     creditTerms: { type: String, default: 'None' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Tenant/organization this B2B company belongs to (3-layer structure).
+    // Optional + backfilled; enables Company Owner data isolation (req #7).
+    organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
     isActive: { type: Boolean, default: true },
 
     // multiple contact people

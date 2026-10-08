@@ -2,22 +2,37 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { PageHeader, Card, Table, Badge } from '../../components/ui';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { formFor, isHotelLike } from '../shared/serviceForms';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function OrderDetail() {
   const { id } = useParams();
   const nav = useNavigate();
+  const base = useShellBase();
+  const confirm = useConfirm();
   const [data, setData] = useState(null);
 
-  useEffect(() => { api.get(`/retail/orders/${id}`).then((r) => setData(r.data)); }, [id]);
+  const load = () => api.get(`/retail/orders/${id}`).then((r) => setData(r.data));
+  useEffect(() => { load(); }, [id]);
 
   if (!data) return <div className="text-ink-muted">Loading…</div>;
   const { order } = data;
 
+  // req #2: cancellation only after the invoice is generated (backend re-validates).
+  const cancel = async () => {
+    if (await confirm({ title: 'Cancel order?', message: `Order ${order.orderNo} will be marked as cancelled. This cannot be undone.` })) {
+      await api.put(`/retail/orders/${order._id}/cancel`); load();
+    }
+  };
+
   return (
     <div className="max-w-3xl">
       <PageHeader eyebrow="Retail" title={`Order ${order.orderNo}`}
-        actions={<Badge>{order.invoiceType || 'DOMESTIC'}</Badge>} />
+        actions={<div className="flex items-center gap-2">
+          {order.cancelled && <Badge status="UNPAID">Cancelled</Badge>}
+          <Badge>{order.invoiceType || 'DOMESTIC'}</Badge>
+        </div>} />
 
       {order.services.map((s, i) => (
         <Card key={i} title={order.services.length > 1 ? `${s.serviceType} — Entry ${String(i + 1).padStart(3, '0')}` : `${s.serviceType} — booking details`} className="mb-4">
@@ -35,8 +50,15 @@ export default function OrderDetail() {
         Pricing, tax and the invoice for this order are handled at invoice generation.
       </div>
 
-      <div className="mt-4">
-        <button onClick={() => nav('/app/retail/orders')} className="btn-ghost">Back to orders</button>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button onClick={() => nav(`${base}/retail/orders`)} className="btn-ghost">Back to orders</button>
+        {/* req #1/#2: same gating as the listing — Edit before invoice, Cancel after. */}
+        {!order.invoiceGenerated && !order.cancelled && (
+          <button onClick={() => nav(`${base}/retail/orders/${order._id}/edit`)} className="btn-primary">Edit order</button>
+        )}
+        {order.invoiceGenerated && !order.cancelled && (
+          <button onClick={cancel} className="btn-danger">Cancel order</button>
+        )}
       </div>
     </div>
   );

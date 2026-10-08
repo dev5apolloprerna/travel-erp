@@ -4,10 +4,12 @@ import api from '../../api/client';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Table, EmptyRow, RowActions, Badge, Modal, Field, Input } from '../../components/ui';
 import PasswordInput from '../../components/ui/PasswordInput';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function EmployeeList() {
   const confirm = useConfirm();
   const nav = useNavigate();
+  const base = useShellBase();
   const [items, setItems] = useState([]);
   const [pwUser, setPwUser] = useState(null);
   const [newPw, setNewPw] = useState('');
@@ -50,7 +52,7 @@ export default function EmployeeList() {
   return (
     <div>
       <PageHeader eyebrow="Administration" title="Team / Employees"
-        actions={<button onClick={() => nav('/app/admin/employees/new')} className="btn-primary">Create employee</button>} />
+        actions={<button onClick={() => nav(`${base}/admin/employees/new`)} className="btn-primary">Create employee</button>} />
 
       {msg && (
         <div className={`mb-4 rounded-lg px-3 py-2 text-sm ${msg.type === 'ok' ? 'bg-accent-light text-accent-dark' : 'bg-red-50 text-red-600'}`}>
@@ -58,12 +60,13 @@ export default function EmployeeList() {
         </div>
       )}
 
-      <Table head={['Name', 'Email', 'Type', 'Modules', 'Services', 'Status', 'Actions']}>
-        {items.length === 0 && <EmptyRow span={7} text="No team members yet." />}
+      <Table head={['Name', 'Email', 'Phone', 'Type', 'Modules', 'Services', 'Status', 'Actions']}>
+        {items.length === 0 && <EmptyRow span={8} text="No team members yet." />}
         {items.map((e) => (
           <tr key={e._id}>
             <td className="td font-medium text-ink">{e.name}</td>
             <td className="td">{e.email}</td>
+            <td className="td">{e.phone || '—'}</td>
             <td className="td">{e.employeeType || '—'}</td>
             <td className="td">{(e.modules || []).join(', ') || '—'}</td>
             <td className="td">{(e.services || []).length} assigned</td>
@@ -74,7 +77,7 @@ export default function EmployeeList() {
             </td>
             <td className="td">
               <RowActions
-                onEdit={() => nav(`/app/admin/employees/${e._id}`)}
+                onEdit={() => nav(`${base}/admin/employees/${e._id}`)}
                 onDelete={() => del(e)}
                 extra={
                   <>

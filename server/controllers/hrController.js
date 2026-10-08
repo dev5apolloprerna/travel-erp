@@ -111,6 +111,16 @@ export const decideLeave = async (req, res) => {
   const leave = await Leave.findById(req.params.id);
   if (!leave) return res.status(404).json({ message: 'Leave request not found' });
 
+  // req #3: leave approval/rejection is restricted to an authorized approver
+  // (admin / manager with the 'ALL' permission), per the existing role structure.
+  // Enforced on the backend so it cannot be bypassed by a direct API request.
+  if (!isAdmin(req.user))
+    return res.status(403).json({ message: 'You are not authorized to approve or reject leave requests.' });
+  // req #3: the employee who submitted the request must NOT be able to approve or
+  // reject their own request — even if they are otherwise an authorized approver.
+  if (String(leave.employeeId) === String(req.user._id))
+    return res.status(403).json({ message: 'You cannot approve or reject your own leave request.' });
+
   leave.status = status;
   leave.adminRemark = adminRemark || '';
   leave.approvedBy = req.user._id;

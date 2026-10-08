@@ -7,13 +7,26 @@ export const slugify = (s) =>
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
 
+// SEO block — description/keywords now hold rich text (HTML); head/body added.
 const seoFields = {
   seoTitle: { type: String, default: '' },
-  seoDescription: { type: String, default: '' },
-  seoKeywords: { type: String, default: '' },
+  seoDescription: { type: String, default: '' },   // rich text (HTML)
+  seoKeywords: { type: String, default: '' },       // rich text (HTML)
+  seoHead: { type: String, default: '' },           // rich text (HTML)
+  seoBody: { type: String, default: '' },           // rich text (HTML)
 };
 
-/* ---------- Level 1: Main category (Region, e.g. Latin America/Caribbean) ---------- */
+// Repeatable "Experience" on a category (label + single image + rich description).
+const experienceSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: '' },
+    image: { type: String, default: '' },
+    description: { type: String, default: '' },      // rich text (HTML)
+  },
+  { _id: true }
+);
+
+/* ---------- Main category (Region) ---------- */
 const categorySchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -22,31 +35,22 @@ const categorySchema = new mongoose.Schema(
     image: { type: String, default: '' },
     displayOrder: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
+
+    // New category fields
+    bestTime: { type: String, default: '' },          // e.g. "Oct – Mar"
+    idealDuration: { type: String, default: '' },     // e.g. "10–18 Days"
+    travelStyle: { type: String, default: '' },       // e.g. "Culture · Cities · Beaches · Food"
+    experiences: { type: [experienceSchema], default: [] },
+
     ...seoFields,
   },
   { timestamps: true }
 );
 
-/* ---------- Level 2: Sub category (Country/State, e.g. Bahamas) ---------- */
-const subCategorySchema = new mongoose.Schema(
-  {
-    categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'DestinationCategory', required: true, index: true },
-    name: { type: String, required: true },
-    slug: { type: String, index: true },
-    description: { type: String, default: '' },
-    image: { type: String, default: '' },
-    displayOrder: { type: Number, default: 0 },
-    isActive: { type: Boolean, default: true },
-    ...seoFields,
-  },
-  { timestamps: true }
-);
-
-/* ---------- Level 3: Destination detail (the full content page) ---------- */
+/* ---------- Destination detail (the full content page) ---------- */
 const destinationSchema = new mongoose.Schema(
   {
     categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'DestinationCategory', index: true },
-    subCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'DestinationSubCategory', index: true },
 
     name: { type: String, required: true },
     slug: { type: String, index: true },
@@ -60,14 +64,14 @@ const destinationSchema = new mongoose.Schema(
     longDescription: { type: String, default: '' },
 
     // Content blocks, mirroring the reference destination page
-    places: { type: [String], default: [] },                 // Places covered
-    bestTimeSeasons: { type: [String], default: [] },        // e.g. Winter, Summer
-    bestTimeMonths: { type: [String], default: [] },         // e.g. Nov, Dec, Jan
+    places: { type: [String], default: [] },
+    bestTimeSeasons: { type: [String], default: [] },
+    bestTimeMonths: { type: [String], default: [] },
     uniquelyPopularFor: { type: [String], default: [] },
     touristAttractions: { type: [String], default: [] },
     memorablePursuits: { type: [String], default: [] },
     somethingLeisurely: { type: [String], default: [] },
-    quickTips: { type: [String], default: [] },              // Quick tips from locals
+    quickTips: { type: [String], default: [] },
 
     displayOrder: { type: Number, default: 0 },
     isFeatured: { type: Boolean, default: false },
@@ -78,7 +82,7 @@ const destinationSchema = new mongoose.Schema(
 );
 
 // Keep slugs in sync with names.
-for (const schema of [categorySchema, subCategorySchema, destinationSchema]) {
+for (const schema of [categorySchema, destinationSchema]) {
   schema.pre('save', function (next) {
     if (!this.slug || this.isModified('name')) this.slug = slugify(this.name);
     next();
@@ -86,5 +90,4 @@ for (const schema of [categorySchema, subCategorySchema, destinationSchema]) {
 }
 
 export const DestinationCategory = mongoose.model('DestinationCategory', categorySchema);
-export const DestinationSubCategory = mongoose.model('DestinationSubCategory', subCategorySchema);
 export const Destination = mongoose.model('Destination', destinationSchema);

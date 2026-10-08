@@ -13,6 +13,7 @@ const customerSchema = new mongoose.Schema(
     gstNumber: { type: String, default: '' },
     address: String,
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
     isActive: { type: Boolean, default: true },
 
     // customer-level documents (any type: PAN, Aadhar, Passport, photo...)

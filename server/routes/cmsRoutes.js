@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as c from '../controllers/cmsController.js';
 import * as wb from '../controllers/websiteBookingController.js';
+import { listInquiries, deleteInquiry } from '../controllers/publicController.js';
 import { protect, allow } from '../middleware/auth.js';
 import { ROLES } from '../models/User.js';
 import { upload, toFolder } from '../utils/upload.js';
@@ -16,10 +17,6 @@ r.put('/categories/:id', c.updateCategory);
 r.delete('/categories/:id', c.deleteCategory);
 
 // ---- Destination: sub category ----
-r.get('/subcategories', c.listSubCategories);
-r.post('/subcategories', c.createSubCategory);
-r.put('/subcategories/:id', c.updateSubCategory);
-r.delete('/subcategories/:id', c.deleteSubCategory);
 
 // ---- Destination detail ----
 r.get('/destinations', c.listDestinations);
@@ -56,5 +53,9 @@ r.get('/bookings', wb.listBookings);
 r.get('/bookings/:id', wb.getBooking);
 r.put('/bookings/:id', wb.updateBooking);
 r.post('/bookings/:id/fulfil', wb.fulfilManually);
+
+// ---- Website inquiries (Super Admin) ----
+r.get('/inquiries', listInquiries);
+r.delete('/inquiries/:id', deleteInquiry);
 
 export default r;

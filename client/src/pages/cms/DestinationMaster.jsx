@@ -2,17 +2,18 @@ import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import ImageUpload from '../../components/ui/ImageUpload';
+import RichText from '../../components/ui/RichText';
 import { PageHeader, Card, Field, Input, Textarea, Table, EmptyRow, RowActions, Badge, Modal, Tabs } from '../../components/ui';
 
 const blank = {
-  categoryId: '', subCategoryId: '', name: '',
+  categoryId: '', name: '',
   bannerImage: '', sliderImages: [],
   shortDescription: '', longDescription: '',
   places: '', bestTimeSeasons: '', bestTimeMonths: '',
   uniquelyPopularFor: '', touristAttractions: '', memorablePursuits: '',
   somethingLeisurely: '', quickTips: '',
   displayOrder: 0, isFeatured: false, isActive: true,
-  seoTitle: '', seoDescription: '', seoKeywords: '',
+  seoTitle: '', seoDescription: '', seoKeywords: '', seoHead: '', seoBody: '',
 };
 
 // Content blocks that are simple lists — one item per line.
@@ -33,7 +34,6 @@ export default function DestinationMaster() {
   const confirm = useConfirm();
   const [rows, setRows] = useState([]);
   const [cats, setCats] = useState([]);
-  const [subs, setSubs] = useState([]);
   const [filters, setFilters] = useState({ categoryId: '', search: '' });
   const [form, setForm] = useState(null);
   const [editId, setEditId] = useState(null);
@@ -44,11 +44,7 @@ export default function DestinationMaster() {
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [filters.categoryId, filters.search]);
   useEffect(() => {
     api.get('/cms/categories').then((r) => setCats(r.data));
-    api.get('/cms/subcategories').then((r) => setSubs(r.data));
   }, []);
-
-  const subsFor = (categoryId) =>
-    categoryId ? subs.filter((s) => String(s.categoryId?._id || s.categoryId) === String(categoryId)) : subs;
 
   const open = (row) => {
     setTab('basic'); setError('');
@@ -57,7 +53,6 @@ export default function DestinationMaster() {
       ...blank,
       ...row,
       categoryId: row.categoryId?._id || row.categoryId || '',
-      subCategoryId: row.subCategoryId?._id || row.subCategoryId || '',
       sliderImages: row.sliderImages || [],
       ...Object.fromEntries(LIST_FIELDS.map(([k]) => [k, toText(row[k])])),
     });
@@ -99,13 +94,12 @@ export default function DestinationMaster() {
         </div>
       </Card>
 
-      <Table head={['Destination', 'Category', 'Sub category', 'URL slug', 'Featured', 'Status', 'Actions']}>
-        {rows.length === 0 && <EmptyRow span={7} text="No destinations yet. Add one to publish it on the website." />}
+      <Table head={['Destination', 'Category', 'URL slug', 'Featured', 'Status', 'Actions']}>
+        {rows.length === 0 && <EmptyRow span={6} text="No destinations yet. Add one to publish it on the website." />}
         {rows.map((r) => (
           <tr key={r._id}>
             <td className="td font-medium text-ink">{r.name}</td>
             <td className="td">{r.categoryId?.name || '—'}</td>
-            <td className="td">{r.subCategoryId?.name || '—'}</td>
             <td className="td font-mono text-xs">{r.slug}</td>
             <td className="td">{r.isFeatured ? <Badge status="PARTIAL">Featured</Badge> : '—'}</td>
             <td className="td"><Badge status={r.isActive ? 'PAID' : 'UNPAID'}>{r.isActive ? 'Live' : 'Hidden'}</Badge></td>
@@ -129,15 +123,9 @@ export default function DestinationMaster() {
             {tab === 'basic' && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Main category">
-                  <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value, subCategoryId: '' })} className="input">
+                  <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className="input">
                     <option value="">Select…</option>
                     {cats.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
-                  </select>
-                </Field>
-                <Field label="Sub category">
-                  <select value={form.subCategoryId} onChange={set('subCategoryId')} className="input">
-                    <option value="">Select…</option>
-                    {subsFor(form.categoryId).map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
                   </select>
                 </Field>
                 <div className="sm:col-span-2"><Field label="Destination name *"><Input value={form.name} onChange={set('name')} placeholder="Bahamas" /></Field></div>
@@ -182,8 +170,10 @@ export default function DestinationMaster() {
             {tab === 'seo' && (
               <div className="grid gap-3">
                 <Field label="SEO title"><Input value={form.seoTitle} onChange={set('seoTitle')} /></Field>
-                <Field label="SEO description"><Textarea rows={3} value={form.seoDescription} onChange={set('seoDescription')} /></Field>
-                <Field label="SEO keywords"><Input value={form.seoKeywords} onChange={set('seoKeywords')} placeholder="bahamas, caribbean holiday" /></Field>
+                <Field label="SEO description"><RichText value={form.seoDescription} onChange={(html) => setForm({ ...form, seoDescription: html })} placeholder="SEO description…" /></Field>
+                <Field label="SEO keywords"><RichText value={form.seoKeywords} onChange={(html) => setForm({ ...form, seoKeywords: html })} placeholder="SEO keywords…" /></Field>
+                <Field label="Head"><RichText value={form.seoHead} onChange={(html) => setForm({ ...form, seoHead: html })} placeholder="Head markup…" /></Field>
+                <Field label="Body"><RichText value={form.seoBody} onChange={(html) => setForm({ ...form, seoBody: html })} placeholder="Body markup…" /></Field>
                 {editId && <p className="text-xs text-ink-muted">Page URL: <span className="font-mono">/{form.slug}</span></p>}
               </div>
             )}

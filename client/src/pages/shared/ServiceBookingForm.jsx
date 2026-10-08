@@ -4,7 +4,9 @@ import api from '../../api/client';
 import { formFor, isHotelLike } from './serviceForms';
 
 // Dropdown that loads its options from a me_ master collection via the staff options API.
-function MRefSelect({ masterKey, value, onChange }) {
+// byName=false (default): stores the record id (value). byName=true: stores the name (label),
+// used where the booking/invoice expects the plain text value (e.g. Hotel Name, Meal Plan, Quota).
+function MRefSelect({ masterKey, value, onChange, byName = false }) {
   const [options, setOptions] = useState([]);
   useEffect(() => {
     let alive = true;
@@ -16,7 +18,10 @@ function MRefSelect({ masterKey, value, onChange }) {
   return (
     <Select value={value || ''} onChange={(e) => onChange(e.target.value)}>
       <option value="">Select…</option>
-      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      {options.map((o) => {
+        const v = byName ? o.label : o.value;
+        return <option key={o.value} value={v}>{o.label}</option>;
+      })}
     </Select>
   );
 }
@@ -50,6 +55,8 @@ export default function ServiceBookingForm({ serviceName, value, onChange }) {
               </Select>
             ) : type === 'mref' ? (
               <MRefSelect masterKey={options} value={value[key]} onChange={setVal(key)} />
+            ) : type === 'mname' ? (
+              <MRefSelect masterKey={options} value={value[key]} onChange={setVal(key)} byName />
             ) : (
               <Input type={type || 'text'} value={value[key] || ''} onChange={set(key)} />
             )}
@@ -72,7 +79,7 @@ export default function ServiceBookingForm({ serviceName, value, onChange }) {
           {rooms.map((r, i) => (
             <div key={i} className="mb-2 grid gap-2 sm:grid-cols-[1.3fr_1.1fr_0.7fr_0.7fr_0.8fr_0.7fr_auto]">
               <Input placeholder="Room Type" value={r.roomType || ''} onChange={(e) => setRoom(i, 'roomType', e.target.value)} />
-              <Input placeholder="Meal Plan" value={r.mealPlan || ''} onChange={(e) => setRoom(i, 'mealPlan', e.target.value)} />
+              <MRefSelect masterKey="mealPlan" value={r.mealPlan || ''} onChange={(v) => setRoom(i, 'mealPlan', v)} byName />
               <Input type="number" placeholder="Rooms" value={r.roomCount || ''} onChange={(e) => setRoom(i, 'roomCount', e.target.value)} />
               <Input type="number" placeholder="Persons" value={r.persons || ''} onChange={(e) => setRoom(i, 'persons', e.target.value)} />
               <Input type="number" placeholder="Rate" value={r.rate || ''} onChange={(e) => setRoom(i, 'rate', e.target.value)} />

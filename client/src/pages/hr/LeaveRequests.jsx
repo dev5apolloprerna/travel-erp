@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { PageHeader, Card, Field, Input, Select, Table, EmptyRow, Badge, Modal } from '../../components/ui';
 
 const statusStyle = (s) => ({
@@ -9,6 +10,8 @@ const statusStyle = (s) => ({
 const LEAVE_TYPES = ['CASUAL', 'SICK', 'EARNED', 'UNPAID'];
 
 export default function LeaveRequests() {
+  const { user } = useAuth();
+  const isApprover = user?.role === 'SUPER_ADMIN' || (user?.menus || []).includes('ALL');
   const [leaves, setLeaves] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [filter, setFilter] = useState({ status: '', employeeId: '' });
@@ -74,14 +77,23 @@ export default function LeaveRequests() {
             <td className="td">{l.reason || '—'}</td>
             <td className="td"><Badge status={statusStyle(l.status)}>{l.status}</Badge></td>
             <td className="td">
-              {l.status === 'PENDING' ? (
-                <div className="flex gap-2">
-                  <button onClick={() => { setDecide({ leave: l, status: 'APPROVED' }); setRemark(''); }} className="btn-accent btn-sm">Approve</button>
-                  <button onClick={() => { setDecide({ leave: l, status: 'REJECTED' }); setRemark(''); }} className="btn-danger btn-sm">Reject</button>
-                </div>
-              ) : (
-                <span className="text-xs text-ink-muted">{l.approvedBy?.name ? `by ${l.approvedBy.name}` : '—'}</span>
-              )}
+              {(() => {
+                // req #3: a user can never approve/reject their OWN request, and only an
+                // authorized approver sees the controls at all. The backend enforces both.
+                const isOwn = String(l.employeeId?._id || l.employeeId) === String(user?.id);
+                if (l.status !== 'PENDING')
+                  return <span className="text-xs text-ink-muted">{l.approvedBy?.name ? `by ${l.approvedBy.name}` : '—'}</span>;
+                if (isOwn)
+                  return <span className="text-xs text-ink-muted">Your own request</span>;
+                if (!isApprover)
+                  return <span className="text-xs text-ink-muted">Awaiting approval</span>;
+                return (
+                  <div className="flex gap-2">
+                    <button onClick={() => { setDecide({ leave: l, status: 'APPROVED' }); setRemark(''); }} className="btn-accent btn-sm">Approve</button>
+                    <button onClick={() => { setDecide({ leave: l, status: 'REJECTED' }); setRemark(''); }} className="btn-danger btn-sm">Reject</button>
+                  </div>
+                );
+              })()}
             </td>
           </tr>
         ))}

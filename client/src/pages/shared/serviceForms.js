@@ -23,7 +23,7 @@ const FLIGHT = [
 const RAILWAY = [
   ['train', 'Train'],
   ['status', 'Status', 'select', ['Confirm', 'RAC', 'Waitlist', 'Tatkal']],
-  ['quota', 'Quota', 'select', ['General', 'Tatkal', 'Ladies', 'Senior Citizen', 'Premium Tatkal']],
+  ['quota', 'Quota', 'mname', 'quota'],
   ['ticketNo', 'Ticket No.'],
   ['railwayPnr', 'Railway PNR'],
   ['coachNo', 'Coach No.'],
@@ -102,8 +102,7 @@ const CAB = [
 
 // Hotel has a repeatable room-row section handled specially in the form component.
 const HOTEL = [
-  ['hotelName', 'Hotel Name'],
-  ['guestName', 'Name of Guest'],
+  ['hotelName', 'Hotel Name', 'mname', 'property'],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
   ['adults', 'Adults', 'number'],
   ['children', 'Children', 'number'],

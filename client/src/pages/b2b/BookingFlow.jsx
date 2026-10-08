@@ -5,11 +5,13 @@ import { useAuth } from '../../context/AuthContext';
 import { PageHeader, Card, Field, Input, Select } from '../../components/ui';
 import { iconFor } from '../shared/serviceForms';
 import MultiEntryBookingForm from '../shared/MultiEntryBookingForm';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function BookingFlow() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const { user } = useAuth();
+  const base = useShellBase();
 
   const [companies, setCompanies] = useState([]);
   const [members, setMembers] = useState([]);
@@ -60,7 +62,7 @@ export default function BookingFlow() {
         companyId, requestedByMemberId: requestedByMemberId || undefined,
         invoiceType, services,
       });
-      nav(`/app/b2b/companies/${companyId}?tab=orders`);
+      nav(`${base}/b2b/companies/${companyId}?tab=orders`);
     } catch (err) {
       setError(err.response?.data?.message || 'Could not save the booking.');
     } finally { setSaving(false); }
@@ -116,13 +118,18 @@ export default function BookingFlow() {
         </Card>
       ) : (
         <div className="space-y-4">
+          {/* Prominent way back to the service picker — no browser Back needed (#2). */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl2 border border-brand/30 bg-brand-light/40 px-4 py-2.5">
+            <span className="text-sm font-semibold text-ink">Selected service: <span className="text-brand">{chosen.name}</span></span>
+            <button onClick={() => { setChosen(null); setEntries([{ passengers: [{ name: '' }] }]); }} className="btn-ghost btn-sm">← Change Service</button>
+          </div>
           <Card title={`${chosen.name} details — ${invoiceType === 'DOMESTIC' ? 'Domestic' : 'International'}`}>
             <MultiEntryBookingForm serviceName={chosen.name} entries={entries} onChange={setEntries} />
           </Card>
 
           <div className="flex gap-2">
             <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Save booking'}</button>
-            <button onClick={() => setChosen(null)} className="btn-ghost">Back to services</button>
+            <button onClick={() => { setChosen(null); setEntries([{ passengers: [{ name: '' }] }]); }} className="btn-ghost">← Change Service</button>
           </div>
         </div>
       )}

@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { PageHeader, Card, Field, Input, Select } from '../../components/ui';
 import { iconFor } from '../shared/serviceForms';
 import MultiEntryBookingForm from '../shared/MultiEntryBookingForm';
 import NewCustomerModal from './NewCustomerModal';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function BookingFlow() {
   const nav = useNavigate();
   const [params] = useSearchParams();
+  const { id: editId } = useParams();          // present only on the /:id/edit route (req #1)
   const { user } = useAuth();
+  const base = useShellBase();
 
   const [customers, setCustomers] = useState([]);
   const [services, setServices] = useState([]);          // from Service master
@@ -22,11 +25,41 @@ export default function BookingFlow() {
   const [error, setError] = useState('');
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustNote, setNewCustNote] = useState(null);
+  const [editOrder, setEditOrder] = useState(null);     // raw order loaded for editing
 
   useEffect(() => {
     api.get('/retail/customers').then((r) => setCustomers(r.data));
     api.get('/services').then((r) => setServices(r.data.filter((s) => s.isActive !== false)));
   }, []);
+
+  // req #1: load the order being edited and prefill the form. An order whose invoice has
+  // already been generated (or that is cancelled) is NOT editable — bounce to its detail.
+  useEffect(() => {
+    if (!editId) return;
+    api.get(`/retail/orders/${editId}`).then((r) => {
+      const o = r.data.order;
+      if (o.invoiceGenerated || o.cancelled) { nav(`${base}/retail/orders/${o._id}`); return; }
+      setEditOrder(o);
+      setCustomerId(o.customerId?._id || o.customerId || '');
+      setInvoiceType(o.invoiceType || 'DOMESTIC');
+      const ents = (o.services || []).map((s) => {
+        const { serviceType, serviceRef, _id, passengers, ...fields } = s;
+        return { ...fields, passengers: passengers?.length ? passengers : [{ name: '' }] };
+      });
+      setEntries(ents.length ? ents : [{ passengers: [{ name: '' }] }]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId]);
+
+  // Resolve the selected Service master once both the order and the service list are loaded.
+  useEffect(() => {
+    if (!editOrder || !services.length || chosen) return;
+    const ref = editOrder.services?.[0]?.serviceRef;
+    const refId = ref?._id || ref;
+    const svc = services.find((s) => String(s._id) === String(refId));
+    if (svc) setChosen(svc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editOrder, services]);
 
   const isAdmin = user?.role === 'SUPER_ADMIN' || (user?.menus || []).includes('ALL');
   const allowedIds = (user?.services || []).map((sv) => String(sv._id || sv));
@@ -63,8 +96,13 @@ export default function BookingFlow() {
           passengers: passengers.filter((p) => p.name?.trim()),
         };
       });
-      await api.post('/retail/orders', { customerId, invoiceType, services });
-      nav('/app/retail/orders');
+      if (editId) {
+        await api.put(`/retail/orders/${editId}`, { customerId, invoiceType, services });
+        nav(`${base}/retail/orders/${editId}`);
+      } else {
+        await api.post('/retail/orders', { customerId, invoiceType, services });
+        nav(`${base}/retail/orders`);
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Could not save the booking.');
     } finally { setSaving(false); }
@@ -72,7 +110,7 @@ export default function BookingFlow() {
 
   return (
     <div className="max-w-4xl">
-      <PageHeader eyebrow="Retail" title="New booking" />
+      <PageHeader eyebrow="Retail" title={editId ? 'Edit booking' : 'New booking'} />
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
       <Card title="Customer & service" className="mb-4">
@@ -120,13 +158,18 @@ export default function BookingFlow() {
         </Card>
       ) : (
         <div className="space-y-4">
+          {/* Prominent way back to the service picker — no browser Back needed (#2). */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl2 border border-brand/30 bg-brand-light/40 px-4 py-2.5">
+            <span className="text-sm font-semibold text-ink">Selected service: <span className="text-brand">{chosen.name}</span></span>
+            <button onClick={() => { setChosen(null); setEntries([{ passengers: [{ name: '' }] }]); }} className="btn-ghost btn-sm">← Change Service</button>
+          </div>
           <Card title={`${chosen.name} details — ${invoiceType === 'DOMESTIC' ? 'Domestic' : 'International'}`}>
             <MultiEntryBookingForm serviceName={chosen.name} entries={entries} onChange={setEntries} />
           </Card>
 
           <div className="flex gap-2">
-            <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Save booking'}</button>
-            <button onClick={() => setChosen(null)} className="btn-ghost">Back to services</button>
+            <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : (editId ? 'Update booking' : 'Save booking')}</button>
+            <button onClick={() => { setChosen(null); setEntries([{ passengers: [{ name: '' }] }]); }} className="btn-ghost">← Change Service</button>
           </div>
         </div>
       )}

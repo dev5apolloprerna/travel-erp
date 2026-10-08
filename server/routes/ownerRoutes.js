@@ -5,9 +5,12 @@ import { sampleExcel, importExcel } from '../masterEngine/masterImport.js';
 import { protect, allow } from '../middleware/auth.js';
 import { ROLES } from '../models/User.js';
 
-// Company Owner area — all master CRUD, available ONLY to COMPANY_OWNER.
+// Company Owner master area — CRUD for the wireframe masters.
+// Available to COMPANY_OWNER and to SUPER_ADMIN (administrative access, req #3/#4).
+// Record-level tenant isolation is handled inside the controllers for the masters
+// that carry an organization; SUPER_ADMIN is unrestricted.
 const r = Router();
-r.use(protect, allow(ROLES.COMPANY_OWNER));
+r.use(protect, allow(ROLES.COMPANY_OWNER, ROLES.SUPER_ADMIN));
 
 // In-memory upload for Excel import (parsed immediately, not stored).
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });

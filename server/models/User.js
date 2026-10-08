@@ -24,7 +24,13 @@ const userSchema = new mongoose.Schema(
     employeeTypes: { type: [String], enum: ['DOMESTIC', 'INTERNATIONAL'], default: [] },
 
     // profile picture (all user types)
+    phone: { type: String, default: '' },
     profilePic: { type: String, default: '' },
+
+    // HR / personal details (req #3 — union of Employee fields with the HR master).
+    // Additive, optional; stored as a flexible object so the login-User employee form
+    // carries the same personal/HR fields as the Company Owner HR employee form.
+    hr: { type: Object, default: {} },
 
     // documents attached to this user (used for B2B member documents)
     documents: [documentSchema],
@@ -40,6 +46,8 @@ const userSchema = new mongoose.Schema(
     // links for portal users
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', default: null },
+    // Tenant/organization this user belongs to (3-layer structure). Optional; backfilled to the default 360 org.
+    organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

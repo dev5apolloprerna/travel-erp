@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { PageHeader, Card, Field, Input, Select, Textarea } from '../../components/ui';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function CompanyForm() {
   const nav = useNavigate();
+  const base = useShellBase();
   const [form, setForm] = useState({ name: '', gst: '', contactPerson: '', contactNumber: '', email: '', billingAddress: '', creditTerms: 'None' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const save = async () => {
     const res = await api.post('/b2b/companies', form);
-    nav(`/app/b2b/companies/${res.data._id}`);
+    nav(`${base}/b2b/companies/${res.data._id}`);
   };
 
   return (
@@ -32,7 +34,7 @@ export default function CompanyForm() {
         </div>
         <div className="mt-5 flex gap-2">
           <button onClick={save} className="btn-primary">Save company</button>
-          <button onClick={() => nav('/app/b2b/companies')} className="btn-ghost">Cancel</button>
+          <button onClick={() => nav(`${base}/b2b/companies`)} className="btn-ghost">Cancel</button>
         </div>
       </Card>
     </div>

@@ -7,12 +7,14 @@ import {
   Field, Input, Select, Textarea, Badge, money,
 } from '../../components/ui';
 import DocumentManager from '../../components/ui/DocumentManager';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function CompanyDetail() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
   const confirm = useConfirm();
+  const base = useShellBase();
   const tab = params.get('tab') || 'info';
   const [data, setData] = useState(null);
 
@@ -27,7 +29,7 @@ export default function CompanyDetail() {
   return (
     <div>
       <PageHeader eyebrow="B2B Company" title={company.name}
-        actions={<button onClick={() => nav('/app/b2b/companies')} className="btn-ghost">Back to list</button>} />
+        actions={<button onClick={() => nav(`${base}/b2b/companies`)} className="btn-ghost">Back to list</button>} />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard value={money(company.totalBilled)} label="Total billed" />
@@ -326,7 +328,7 @@ function OrdersTab({ orders, companyId }) {
   return (
     <Card title="Booking history">
       <div className="mb-3">
-        <button onClick={() => nav(`/app/b2b/orders/new?company=${companyId}`)} className="btn-primary btn-sm">
+        <button onClick={() => nav(`${base}/b2b/orders/new?company=${companyId}`)} className="btn-primary btn-sm">
           + New booking
         </button>
       </div>
@@ -340,8 +342,8 @@ function OrdersTab({ orders, companyId }) {
             <td className="td">{o.services?.map((s) => s.serviceType).join(', ')}</td>
             <td className="td">
               {o.invoiceGenerated
-                ? <button onClick={() => nav(`/app/invoices/${o._id}/generate`)} className="font-mono text-brand hover:underline">{o.invoiceNo}</button>
-                : <button onClick={() => nav(`/app/invoices/${o._id}/generate`)} className="btn-ghost btn-sm">Generate</button>}
+                ? <button onClick={() => nav(`${base}/invoices/${o._id}/generate`)} className="font-mono text-brand hover:underline">{o.invoiceNo}</button>
+                : <button onClick={() => nav(`${base}/invoices/${o._id}/generate`)} className="btn-ghost btn-sm">Generate</button>}
             </td>
             <td className="td">{o.invoiceGenerated ? money(o.netInvoiceAmount) : '—'}</td>
             <td className="td">{new Date(o.createdAt).toLocaleDateString('en-IN')}</td>

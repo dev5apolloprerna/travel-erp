@@ -3,11 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Table, EmptyRow, RowActions, money } from '../../components/ui';
+import { useShellBase } from '../../hooks/useShellBase';
 
 export default function CompanyList() {
   const [companies, setCompanies] = useState([]);
   const nav = useNavigate();
   const confirm = useConfirm();
+  const base = useShellBase();
 
   const load = () => api.get('/b2b/companies').then((r) => setCompanies(r.data));
   useEffect(() => { load(); }, []);
@@ -22,8 +24,8 @@ export default function CompanyList() {
       <PageHeader eyebrow="B2B" title="Companies"
         actions={
           <div className="flex gap-2">
-            <Link to="/app/b2b/orders/new" className="btn-accent">New booking</Link>
-            <Link to="/app/b2b/companies/new" className="btn-primary">New company</Link>
+            <Link to={`${base}/b2b/orders/new`} className="btn-accent">New booking</Link>
+            <Link to={`${base}/b2b/companies/new`} className="btn-primary">New company</Link>
           </div>
         } />
       <Table head={['Company', 'Members', 'Billed', 'Paid', 'Outstanding', 'Actions']}>
@@ -37,12 +39,12 @@ export default function CompanyList() {
             <td className="td font-semibold">{money(c.totalBilled - c.totalPaid)}</td>
             <td className="td">
               <RowActions
-                onEdit={() => nav(`/app/b2b/companies/${c._id}?tab=info`)}
+                onEdit={() => nav(`${base}/b2b/companies/${c._id}?tab=info`)}
                 onDelete={() => del(c)}
                 extra={
                   <>
-                    <button onClick={() => nav(`/app/b2b/orders/new?company=${c._id}`)} className="btn-ghost btn-sm">Book</button>
-                    <button onClick={() => nav(`/app/b2b/companies/${c._id}`)} className="btn-primary btn-sm">Open</button>
+                    <button onClick={() => nav(`${base}/b2b/orders/new?company=${c._id}`)} className="btn-ghost btn-sm">Book</button>
+                    <button onClick={() => nav(`${base}/b2b/companies/${c._id}`)} className="btn-primary btn-sm">Open</button>
                   </>
                 }
               />

@@ -1,4 +1,4 @@
-import { DestinationCategory, DestinationSubCategory, Destination } from '../models/Destination.js';
+import { DestinationCategory, Destination } from '../models/Destination.js';
 import TourPackage from '../models/TourPackage.js';
 import { Faq, Testimonial } from '../models/Content.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
@@ -34,43 +34,14 @@ export const updateCategory = async (req, res) => {
 };
 
 export const deleteCategory = async (req, res) => {
-  const inUse = await DestinationSubCategory.countDocuments({ categoryId: req.params.id });
+  const inUse = await Destination.countDocuments({ categoryId: req.params.id });
   if (inUse) {
     return res.status(400).json({
-      message: `This category has ${inUse} sub categor${inUse === 1 ? 'y' : 'ies'}. Delete or move them first.`,
+      message: `This category has ${inUse} destination(s). Delete or move them first.`,
     });
   }
   await DestinationCategory.findByIdAndDelete(req.params.id);
   res.json({ message: 'Category deleted' });
-};
-
-/* ============================ SUB CATEGORY ============================ */
-export const listSubCategories = async (req, res) => {
-  const filter = req.query.categoryId ? { categoryId: req.query.categoryId } : {};
-  const rows = await DestinationSubCategory.find(filter)
-    .populate('categoryId', 'name')
-    .sort({ displayOrder: 1, name: 1 });
-  res.json(rows);
-};
-
-export const createSubCategory = async (req, res) =>
-  res.status(201).json(await DestinationSubCategory.create(req.body));
-
-export const updateSubCategory = async (req, res) => {
-  const row = await DestinationSubCategory.findById(req.params.id);
-  if (!row) return res.status(404).json({ message: 'Sub category not found' });
-  Object.assign(row, req.body);
-  await row.save();
-  res.json(row);
-};
-
-export const deleteSubCategory = async (req, res) => {
-  const inUse = await Destination.countDocuments({ subCategoryId: req.params.id });
-  if (inUse) {
-    return res.status(400).json({ message: `This sub category has ${inUse} destination(s). Delete or move them first.` });
-  }
-  await DestinationSubCategory.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Sub category deleted' });
 };
 
 /* ============================ DESTINATION DETAIL ============================ */
@@ -90,12 +61,10 @@ const destinationPayload = (body) => ({
 export const listDestinations = async (req, res) => {
   const filter = {};
   if (req.query.categoryId) filter.categoryId = req.query.categoryId;
-  if (req.query.subCategoryId) filter.subCategoryId = req.query.subCategoryId;
   if (req.query.search) filter.name = new RegExp(req.query.search, 'i');
 
   const rows = await Destination.find(filter)
     .populate('categoryId', 'name')
-    .populate('subCategoryId', 'name')
     .sort({ displayOrder: 1, name: 1 });
   res.json(rows);
 };
@@ -103,7 +72,7 @@ export const listDestinations = async (req, res) => {
 export const getDestination = async (req, res) => {
   const row = await Destination.findById(req.params.id)
     .populate('categoryId', 'name')
-    .populate('subCategoryId', 'name');
+    ;
   if (!row) return res.status(404).json({ message: 'Destination not found' });
   res.json(row);
 };
@@ -167,7 +136,7 @@ export const getPackage = async (req, res) => {
   const row = await TourPackage.findById(req.params.id)
     .populate('destinationId', 'name')
     .populate('categoryId', 'name')
-    .populate('subCategoryId', 'name');
+    ;
   if (!row) return res.status(404).json({ message: 'Package not found' });
   res.json(row);
 };

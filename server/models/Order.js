@@ -37,6 +37,7 @@ const orderSchema = new mongoose.Schema(
     requestedByMemberId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // employee who booked
+    organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
     services: [serviceLineSchema],
     documents: [documentSchema],
 
@@ -61,6 +62,11 @@ const orderSchema = new mongoose.Schema(
     // ---- Invoice ----
     invoiceNo: { type: String, index: true },       // DOM-000001 / INT-000001
     invoiceType: { type: String, enum: ['DOMESTIC', 'INTERNATIONAL'], default: 'DOMESTIC' },
+    // Sales vs Purchase direction (req #4). A customer Order invoice is always a SALES invoice
+    // (the Company Owner / 360 selling to a customer). The 360 ← Main Company PURCHASE invoice is
+    // the separate SupplierInvoice module. Stamped server-side from the creator's context, never
+    // from a client value.
+    invoiceDirection: { type: String, enum: ['SALES', 'PURCHASE'], default: 'SALES' },
     invoiceDate: { type: Date, default: Date.now },
     placeOfSupply: { type: String, default: '' },
     isInterState: { type: Boolean, default: false },  // true -> IGST, false -> CGST+SGST
@@ -93,10 +99,20 @@ const orderSchema = new mongoose.Schema(
     netInvoiceAmount: { type: Number, default: 0 }, // Gross - Discount - TDS - TCS + Govt Tax
     invoiceGenerated: { type: Boolean, default: false },
     invoiceNotes: { type: String, default: '' },
+    // 3-layer link: the parent supplier invoice (Main Company -> 360) this customer invoice derives from.
+    parentInvoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'SupplierInvoice', default: null },
 
     // RETAIL only: order-level payment tracking (B2B uses company running balance)
     paidAmount: { type: Number, default: 0 },
     status: { type: String, enum: ['UNPAID', 'PARTIAL', 'PAID'], default: 'UNPAID' },
+
+    // ---- Cancellation (req #2) ----
+    // An order may be CANCELLED only AFTER its invoice has been generated. This is a soft
+    // cancel (the record is kept for audit / invoice history), distinct from a hard Delete.
+    // Editing (req #1) is blocked once invoiceGenerated is true; cancelling once cancelled is true.
+    cancelled: { type: Boolean, default: false },
+    cancelledAt: { type: Date, default: null },
+    cancelReason: { type: String, default: '' },
   },
   { timestamps: true }
 );

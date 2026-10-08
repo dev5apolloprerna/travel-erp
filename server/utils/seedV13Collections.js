@@ -19,6 +19,7 @@ import '../models/Settings.js';
 import '../models/TourPackage.js';
 import '../models/User.js';
 import '../models/WebsiteBooking.js';
+import '../models/FrontInquiry.js';
 
 export const seedV13Collections = async () => {
   const db = mongoose.connection.db;

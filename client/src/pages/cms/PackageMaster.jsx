@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import ImageUpload from '../../components/ui/ImageUpload';
+import RichText from '../../components/ui/RichText';
 import { PageHeader, Card, Field, Input, Textarea, Table, EmptyRow, RowActions, Badge, Modal, Tabs, money } from '../../components/ui';
 
 const blank = {
   name: '', packageCode: '', type: 'DOMESTIC',
-  categoryId: '', subCategoryId: '', destinationId: '',
+  categoryId: '', destinationId: '',
   durationDays: 1, durationNights: 0,
   price: 0, discountPrice: 0, currency: 'INR', gstPercent: 5,
   bannerImage: '', images: [],
@@ -14,7 +15,7 @@ const blank = {
   itinerary: [],
   maxPax: 0, availableFrom: '', availableTo: '',
   displayOrder: 0, isFeatured: false, isActive: true,
-  seoTitle: '', seoDescription: '', seoKeywords: '',
+  seoTitle: '', seoDescription: '', seoKeywords: '', seoHead: '', seoBody: '',
 };
 
 const MEALS = ['Breakfast', 'Lunch', 'Dinner'];
@@ -45,7 +46,6 @@ export default function PackageMaster() {
     setForm({
       ...blank, ...row,
       categoryId: row.categoryId?._id || row.categoryId || '',
-      subCategoryId: row.subCategoryId?._id || row.subCategoryId || '',
       destinationId: row.destinationId?._id || row.destinationId || '',
       highlights: toText(row.highlights),
       inclusions: toText(row.inclusions),
@@ -64,7 +64,6 @@ export default function PackageMaster() {
     if (Number(form.price) <= 0) return setError('Enter a price per person.');
     const payload = { ...form };
     if (!payload.categoryId) delete payload.categoryId;
-    if (!payload.subCategoryId) delete payload.subCategoryId;
     if (!payload.destinationId) delete payload.destinationId;
     if (!payload.availableFrom) delete payload.availableFrom;
     if (!payload.availableTo) delete payload.availableTo;
@@ -256,8 +255,10 @@ export default function PackageMaster() {
             {tab === 'seo' && (
               <div className="grid gap-3">
                 <Field label="SEO title"><Input value={form.seoTitle} onChange={set('seoTitle')} /></Field>
-                <Field label="SEO description"><Textarea rows={3} value={form.seoDescription} onChange={set('seoDescription')} /></Field>
-                <Field label="SEO keywords"><Input value={form.seoKeywords} onChange={set('seoKeywords')} /></Field>
+                <Field label="SEO description"><RichText value={form.seoDescription} onChange={(html) => setForm({ ...form, seoDescription: html })} placeholder="SEO description…" /></Field>
+                <Field label="SEO keywords"><RichText value={form.seoKeywords} onChange={(html) => setForm({ ...form, seoKeywords: html })} placeholder="SEO keywords…" /></Field>
+                <Field label="Head"><RichText value={form.seoHead} onChange={(html) => setForm({ ...form, seoHead: html })} placeholder="Head markup…" /></Field>
+                <Field label="Body"><RichText value={form.seoBody} onChange={(html) => setForm({ ...form, seoBody: html })} placeholder="Body markup…" /></Field>
                 {editId && <p className="text-xs text-ink-muted">Page URL: <span className="font-mono">/{form.slug}</span></p>}
               </div>
             )}

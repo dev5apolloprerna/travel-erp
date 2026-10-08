@@ -2,6 +2,8 @@ import Customer from '../models/Customer.js';
 import Order from '../models/Order.js';
 import Payment from '../models/Payment.js';
 import User, { ROLES } from '../models/User.js';
+import { scopeToOrg, ownsOrg } from '../middleware/auth.js';
+import { resolveOrgId } from '../utils/orgContext.js';
 import Service from '../models/Service.js';
 import Settings from '../models/Settings.js';
 // GST no longer applied at order time — tax is entered at invoice generation
@@ -15,20 +17,21 @@ export const listCustomers = async (req, res) => {
   const q = req.query.search
     ? { name: { $regex: req.query.search, $options: 'i' } }
     : {};
-  const customers = await Customer.find(q).sort('-createdAt');
+  const customers = await Customer.find(scopeToOrg(q, req)).sort('-createdAt');
   res.json(customers);
 };
 
 export const getCustomer = async (req, res) => {
   const customer = await Customer.findById(req.params.id);
-  if (!customer) return res.status(404).json({ message: 'Customer not found' });
+  if (!customer || !ownsOrg(customer, req)) return res.status(404).json({ message: 'Customer not found' });
   res.json(customer);
 };
 
 export const createCustomer = async (req, res) => {
   const { name, mobile, email, city, state, stateCode, gstNumber, address } = req.body;
+  const orgId = await resolveOrgId(req);
   const customer = await Customer.create({
-    name, mobile, email, city, state, stateCode, gstNumber, address, createdBy: req.user._id,
+    name, mobile, email, city, state, stateCode, gstNumber, address, createdBy: req.user._id, organizationId: orgId,
   });
 
   // auto-create (or update) a retail customer portal login + (simulated) email.
@@ -39,12 +42,13 @@ export const createCustomer = async (req, res) => {
   const loginEmail = (email || '').toLowerCase().trim();
   let portalUser = await User.findOne({ email: loginEmail });
   if (!portalUser) {
-    portalUser = new User({ name, email: loginEmail, role: ROLES.RETAIL_CUSTOMER, customerId: customer._id });
+    portalUser = new User({ name, email: loginEmail, role: ROLES.RETAIL_CUSTOMER, customerId: customer._id, organizationId: orgId });
   } else {
     // keep it pointed at this customer + retail role
     portalUser.name = name || portalUser.name;
     portalUser.role = ROLES.RETAIL_CUSTOMER;
     portalUser.customerId = customer._id;
+    portalUser.organizationId = orgId;
     portalUser.isActive = true;
   }
   await portalUser.setPassword(tempPass);
@@ -67,7 +71,7 @@ export const createCustomer = async (req, res) => {
 /* ---------------- Customer documents (add / delete, any type) ---------------- */
 export const addCustomerDocument = async (req, res) => {
   const customer = await Customer.findById(req.params.id);
-  if (!customer) return res.status(404).json({ message: 'Customer not found' });
+  if (!customer || !ownsOrg(customer, req)) return res.status(404).json({ message: 'Customer not found' });
   if (!req.file) return res.status(400).json({ message: 'File is required' });
 
   customer.documents.push({
@@ -80,7 +84,7 @@ export const addCustomerDocument = async (req, res) => {
 
 export const deleteCustomerDocument = async (req, res) => {
   const customer = await Customer.findById(req.params.id);
-  if (!customer) return res.status(404).json({ message: 'Customer not found' });
+  if (!customer || !ownsOrg(customer, req)) return res.status(404).json({ message: 'Customer not found' });
 
   const doc = customer.documents.id(req.params.docId);
   if (doc) { removeFile(doc.fileUrl); doc.deleteOne(); }
@@ -90,7 +94,7 @@ export const deleteCustomerDocument = async (req, res) => {
 
 // ---- Orders ----
 export const listOrders = async (req, res) => {
-  const filter = { module: 'RETAIL' };
+  const filter = scopeToOrg({ module: 'RETAIL' }, req);
   // employees see only their own orders (admin sees all)
   if (req.user.role === ROLES.EMPLOYEE) filter.createdBy = req.user._id;
   // a logged-in retail customer only ever sees their own bookings — enforce it
@@ -106,7 +110,12 @@ export const listOrders = async (req, res) => {
 
 export const getOrder = async (req, res) => {
   const order = await Order.findById(req.params.id).populate('customerId');
-  if (!order) return res.status(404).json({ message: 'Order not found' });
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  // A retail customer may only open their OWN order (not another customer's in the same org).
+  if (req.user.role === ROLES.RETAIL_CUSTOMER) {
+    const ownerId = String(order.customerId?._id || order.customerId || '');
+    if (ownerId !== String(req.user.customerId)) return res.status(404).json({ message: 'Order not found' });
+  }
   const payments = await Payment.find({ orderId: order._id }).sort('createdAt');
   res.json({ order, payments });
 };
@@ -143,18 +152,27 @@ export const createOrder = async (req, res) => {
 
   const t = await buildOrderServices(services || [], invoiceType);
 
+  const orgId = await resolveOrgId(req);
   const order = await Order.create({
     module: 'RETAIL', customerId,
     services: t.services,
     invoiceType: t.invoiceType,
     createdBy: req.user._id,
+    organizationId: orgId,
   });
   res.status(201).json(order);
 };
 
 export const updateOrder = async (req, res) => {
   const order = await Order.findById(req.params.id);
-  if (!order) return res.status(404).json({ message: 'Order not found' });
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  // req #1: editing is only allowed BEFORE the invoice is generated. Enforced on the
+  // backend (not just hidden in the UI) so the restriction can't be bypassed by a direct
+  // API request. A cancelled order is likewise read-only.
+  if (order.invoiceGenerated)
+    return res.status(400).json({ message: 'This order cannot be edited because its invoice has already been generated.' });
+  if (order.cancelled)
+    return res.status(400).json({ message: 'This order has been cancelled and can no longer be edited.' });
   const { services, invoiceType } = req.body;
   if (services) {
     const t = await buildOrderServices(services, invoiceType || order.invoiceType);
@@ -165,11 +183,27 @@ export const updateOrder = async (req, res) => {
   res.json(order);
 };
 
+// req #2: cancellation is only allowed AFTER the invoice has been generated. Validated
+// on the actual order/invoice state (not just UI), so a direct request cannot bypass it.
+export const cancelOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  if (!order.invoiceGenerated)
+    return res.status(400).json({ message: 'An order can only be cancelled after its invoice has been generated.' });
+  if (order.cancelled)
+    return res.status(400).json({ message: 'This order is already cancelled.' });
+  order.cancelled = true;
+  order.cancelledAt = new Date();
+  order.cancelReason = (req.body?.reason || '').toString().trim();
+  await order.save();
+  res.json(order);
+};
+
 // ---- Payments (retail: order-linked, partial/full) ----
 export const addPayment = async (req, res) => {
   const { amount, mode, type, paidByCustomer } = req.body;
   const order = await Order.findById(req.params.id);
-  if (!order) return res.status(404).json({ message: 'Order not found' });
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
 
   const payment = await Payment.create({
     module: 'RETAIL', orderId: order._id, amount, mode, type,
@@ -182,15 +216,22 @@ export const addPayment = async (req, res) => {
 
 // Delete customer / order (edit+delete support)
 export const deleteCustomer = async (req, res) => {
+  const existing = await Customer.findById(req.params.id);
+  if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Customer not found' });
   await Customer.findByIdAndDelete(req.params.id);
   res.json({ message: 'Customer deleted' });
 };
 export const updateCustomer = async (req, res) => {
-  const customer = await Customer.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  if (!customer) return res.status(404).json({ message: 'Customer not found' });
+  const existing = await Customer.findById(req.params.id);
+  if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Customer not found' });
+  // organizationId is tenant-owned — never let it be reassigned via the payload
+  const { organizationId, ...patch } = req.body;
+  const customer = await Customer.findByIdAndUpdate(req.params.id, patch, { new: true });
   res.json(customer);
 };
 export const deleteOrder = async (req, res) => {
+  const existing = await Order.findById(req.params.id);
+  if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Order not found' });
   await Order.findByIdAndDelete(req.params.id);
   await Payment.deleteMany({ orderId: req.params.id });
   res.json({ message: 'Order deleted' });

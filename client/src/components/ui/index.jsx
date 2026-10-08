@@ -103,17 +103,20 @@ export function Tabs({ tabs, active, onChange }) {
 }
 
 // Modal shell — wireframe style with header/close and pop shadow.
+// The card is capped to the viewport height and its body scrolls when the content is
+// taller than the screen, so action buttons (Create/Save/Cancel) inside the body stay
+// reachable on any resolution. Short modals are unaffected (the cap only bounds tall ones).
 export function Modal({ title, children, onClose, maxWidth = 'max-w-lg' }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-6" onClick={onClose}>
-      <div className={`w-full ${maxWidth} rounded-2xl bg-white shadow-pop`} onClick={(e) => e.stopPropagation()}>
+      <div className={`flex max-h-[90vh] w-full ${maxWidth} flex-col overflow-hidden rounded-2xl bg-white shadow-pop`} onClick={(e) => e.stopPropagation()}>
         {title && (
-          <div className="flex items-center justify-between border-b border-subtle px-6 py-5">
+          <div className="flex shrink-0 items-center justify-between border-b border-subtle px-6 py-5">
             <h3 className="text-lg font-extrabold text-ink">{title}</h3>
             <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg bg-faint text-ink-muted hover:bg-subtle">×</button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="overflow-y-auto p-6">{children}</div>
       </div>
     </div>
   );
