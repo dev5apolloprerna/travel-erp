@@ -22,6 +22,7 @@ const publicUser = (u) => ({
   profilePic: u.profilePic || '',
   isActive: u.isActive,
   menus: u.menus || [],
+  permissions: u.permissions || {},   // req #9: per-menu action matrix
   modules: u.modules || [],
   services: u.services || [],
   customerId: u.customerId,
@@ -55,7 +56,7 @@ export const me = async (req, res) => {
 
 // ---- Employee management (menu-access controlled) ----
 export const createEmployee = async (req, res) => {
-  const { name, email, password, phone, employeeType, employeeTypes, menus, modules, services, isActive, hr } = req.body;
+  const { name, email, password, phone, employeeType, employeeTypes, menus, permissions, modules, services, isActive, hr } = req.body;
   const exists = await User.findOne({ email: email.toLowerCase() });
   if (exists) return res.status(400).json({ message: 'Email already in use' });
 
@@ -69,7 +70,9 @@ export const createEmployee = async (req, res) => {
     name, email, phone: phone || '', role: ROLES.EMPLOYEE, organizationId: orgId,
     employeeType: employeeType || (employeeTypes || [])[0] || null,
     employeeTypes: employeeTypes || (employeeType ? [employeeType] : []),
-    menus: menus || [], modules: modules || [], services: services || [],
+    // req #9: `permissions` (the action matrix) is the source of truth; `menus` is derived from
+    // it on save. If only a legacy `menus` list is sent, it is still honoured.
+    menus: menus || [], permissions: permissions || {}, modules: modules || [], services: services || [],
     isActive: isActive !== undefined ? isActive : true,
     hr: hr || {},
   });
@@ -79,7 +82,7 @@ export const createEmployee = async (req, res) => {
 };
 
 export const updateEmployee = async (req, res) => {
-  const { name, email, phone, employeeType, employeeTypes, menus, modules, services, password, isActive, hr } = req.body;
+  const { name, email, phone, employeeType, employeeTypes, menus, permissions, modules, services, password, isActive, hr } = req.body;
   const user = await User.findById(req.params.id);
   if (!user || !ownsOrg(user, req)) return res.status(404).json({ message: 'Employee not found' });
 
@@ -90,6 +93,7 @@ export const updateEmployee = async (req, res) => {
   if (employeeType !== undefined) user.employeeType = employeeType;
   if (employeeTypes !== undefined) user.employeeTypes = employeeTypes;
   if (menus !== undefined) user.menus = menus;
+  if (permissions !== undefined) { user.permissions = permissions; user.markModified('permissions'); }  // req #9
   if (modules !== undefined) user.modules = modules;
   if (services !== undefined) user.services = services;
   if (isActive !== undefined) user.isActive = isActive;

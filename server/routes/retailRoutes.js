@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as c from '../controllers/retailController.js';
-import { protect, allow } from '../middleware/auth.js';
+import { protect, allow, can } from '../middleware/auth.js';
 import { ROLES } from '../models/User.js';
 import { upload, toFolder } from '../utils/upload.js';
 
@@ -19,11 +19,16 @@ r.delete('/customers/:id', protect, staff, c.deleteCustomer);
 r.post('/customers/:id/documents', protect, staff, toFolder('customers'), upload.single('file'), c.addCustomerDocument);
 r.delete('/customers/:id/documents/:docId', protect, staff, c.deleteCustomerDocument);
 
+// req #9: order actions are gated by the per-menu permission matrix ('retail-orders'), enforced
+// on the backend. Super Admin bypasses; Company Owner may create/edit but never delete (req #8);
+// employees need the specific action; legacy employees fall back to their old menu access.
 r.get('/orders', protect, staffOrCustomer, c.listOrders);   // customers see only their own (controller-enforced)
-r.post('/orders', protect, staff, c.createOrder);
+r.post('/orders', protect, staff, can('retail-orders', 'CREATE'), c.createOrder);
 r.get('/orders/:id', protect, staffOrCustomer, c.getOrder);
-r.put('/orders/:id', protect, staff, c.updateOrder);
-r.put('/orders/:id/cancel', protect, staff, c.cancelOrder);   // only after invoice generated (req #2)
-r.delete('/orders/:id', protect, staff, c.deleteOrder);
+r.put('/orders/:id', protect, staff, can('retail-orders', 'EDIT'), c.updateOrder);
+r.put('/orders/:id/hold', protect, staff, can('retail-orders', 'EDIT'), c.holdOrder);       // req #1
+r.put('/orders/:id/release', protect, staff, can('retail-orders', 'EDIT'), c.releaseOrder);  // req #1
+r.put('/orders/:id/cancel', protect, staff, can('retail-orders', 'EDIT'), c.cancelOrder);    // only after invoice generated (req #2)
+r.delete('/orders/:id', protect, staff, can('retail-orders', 'DELETE'), c.deleteOrder);      // blocked after invoice/cancel (req #2)
 r.post('/orders/:id/payments', protect, c.addPayment);
 export default r;

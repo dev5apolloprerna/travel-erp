@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Card, Field, Input, money } from '../../components/ui';
 import { formFor } from '../shared/serviceForms';
 import { chargeCalc, hotelCalc } from './invoiceCalc';
@@ -11,6 +13,7 @@ const FOOTER = [
   ['tdsAmount', 'TDS Amount', '-'],
   ['tcsAmount', 'TCS Amount', '-'],
   ['govtTaxAmount', 'Govt Tax Amount', '+'],
+  ['serviceChargeAmount', '360 Service Charge', '+'],   // req #7 — manual at billing time
 ];
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
@@ -18,6 +21,9 @@ export default function InvoiceGenerate() {
   const { orderId } = useParams();
   const nav = useNavigate();
   const base = useShellBase();
+  const { user } = useAuth();
+  const confirm = useConfirm();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   const [order, setOrder] = useState(null);
   const [party, setParty] = useState(null);
@@ -43,6 +49,7 @@ export default function InvoiceGenerate() {
         setFooter({
           discountAmount: o.discountAmount || '', tdsAmount: o.tdsAmount || '',
           tcsAmount: o.tcsAmount || '', govtTaxAmount: o.govtTaxAmount || '',
+          serviceChargeAmount: o.serviceChargeAmount || '',
         });
         if (o.invoiceDate) setInvoiceDate(String(o.invoiceDate).slice(0, 10));
         setNotes(o.invoiceNotes || '');
@@ -70,6 +77,7 @@ export default function InvoiceGenerate() {
       const body = {
         discountAmount: n(footer.discountAmount), tdsAmount: n(footer.tdsAmount),
         tcsAmount: n(footer.tcsAmount), govtTaxAmount: n(footer.govtTaxAmount),
+        serviceChargeAmount: n(footer.serviceChargeAmount),   // req #7
         invoiceDate, invoiceNotes: notes,
       };
       if (calc.isHotel) body.rooms = rooms;
@@ -88,6 +96,27 @@ export default function InvoiceGenerate() {
     a.href = url; a.download = `${done?.invoiceNo || 'invoice'}.pdf`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  // req #8: Super-Admin-only invoice cancellation → raises a linked Credit Note. The backend
+  // re-checks the role, so this cannot be bypassed from the UI.
+  const cancelInvoice = async () => {
+    const ok = await confirm({
+      title: 'Cancel this invoice?',
+      message: `Invoice ${order.invoiceNo} will be cancelled and a Credit Note raised. The invoice record is kept for audit/reporting.`,
+    });
+    if (!ok) return;
+    try {
+      const res = await api.post(`/invoices/${orderId}/cancel`, {});
+      // Refresh the order so the cancelled state + credit note show.
+      const r = await api.get(`/invoices/${orderId}`);
+      setOrder(r.data.order);
+      setError('');
+      setDone(null);
+      alert(res.data.message || 'Invoice cancelled and credit note raised.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not cancel the invoice.');
+    }
   };
 
   const setRoom = (i, k, v) => setRooms((rs) => rs.map((r, x) => (x === i ? { ...r, [k]: v } : r)));
@@ -215,7 +244,7 @@ export default function InvoiceGenerate() {
                   <span className="text-sm font-bold text-ink">Net Invoice Amount</span>
                   <div className="text-right text-lg font-bold text-brand">{money(result.netInvoiceAmount)}</div>
                 </div>
-                <p className="pt-1 text-xs text-ink-muted">Net = Gross − Discount − TDS − TCS + Govt Tax</p>
+                <p className="pt-1 text-xs text-ink-muted">Net = Gross − Discount − TDS − TCS + Govt Tax + Service Charge</p>
               </div>
             </Card>
           </div>
@@ -224,11 +253,24 @@ export default function InvoiceGenerate() {
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any note to print on the invoice" />
           </Card>
 
-          <div className="mt-4 flex gap-2">
-            <button onClick={generate} disabled={saving} className="btn-primary">
-              {saving ? 'Generating…' : order.invoiceGenerated ? 'Regenerate invoice' : 'Generate invoice'}
-            </button>
-            <button onClick={() => nav(backTo)} className="btn-ghost">Cancel</button>
+          {order.invoiceCancelled && (
+            <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+              This invoice was cancelled{order.creditNoteNo ? <> and credit note <b>{order.creditNoteNo}</b> was raised</> : ''}.
+              The record is kept for audit/reporting and cannot be regenerated.
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {!order.invoiceCancelled && (
+              <button onClick={generate} disabled={saving} className="btn-primary">
+                {saving ? 'Generating…' : order.invoiceGenerated ? 'Regenerate invoice' : 'Generate invoice'}
+              </button>
+            )}
+            {/* req #8: only a 360 Super Admin may cancel a generated invoice (backend-enforced). */}
+            {order.invoiceGenerated && !order.invoiceCancelled && isSuperAdmin && (
+              <button onClick={cancelInvoice} className="btn-danger">Cancel invoice &amp; raise credit note</button>
+            )}
+            <button onClick={() => nav(backTo)} className="btn-ghost">Back</button>
           </div>
         </>
       )}

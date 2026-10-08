@@ -96,23 +96,48 @@ const orderSchema = new mongoose.Schema(
     tdsAmount: { type: Number, default: 0 },
     govtTaxAmount: { type: Number, default: 0 },
     tcsAmount: { type: Number, default: 0 },
-    netInvoiceAmount: { type: Number, default: 0 }, // Gross - Discount - TDS - TCS + Govt Tax
+    // Manual "360 service charge" entered at billing time (req #7). Included in the net:
+    // Net = Gross - Discount - TDS - TCS + Govt Tax + Service Charge. Defaults to 0 so every
+    // existing invoice is unchanged.
+    serviceChargeAmount: { type: Number, default: 0 },
+    netInvoiceAmount: { type: Number, default: 0 }, // Gross - Discount - TDS - TCS + Govt Tax + Service Charge
     invoiceGenerated: { type: Boolean, default: false },
     invoiceNotes: { type: String, default: '' },
+    // req #7: which party type this invoice bills — keeps the 360 / Company Owner / Employee /
+    // Retail / B2B / Society distinction explicit on the record. Stamped server-side at generation.
+    billedToType: { type: String, enum: ['RETAIL_CUSTOMER', 'B2B_COMPANY', 'SOCIETY', 'COMPANY_OWNER', ''], default: '' },
     // 3-layer link: the parent supplier invoice (Main Company -> 360) this customer invoice derives from.
     parentInvoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'SupplierInvoice', default: null },
+
+    // ---- Invoice cancellation + credit note (req #8) ----
+    // Cancelling an invoice is a SUPER_ADMIN-only accounting action: the invoice/order record is
+    // NEVER deleted (kept for reporting/audit); instead it is flagged and a linked Credit Note is
+    // raised. This is distinct from the order-level `cancelled` flag (req #2, v32).
+    invoiceCancelled: { type: Boolean, default: false },
+    invoiceCancelledAt: { type: Date, default: null },
+    invoiceCancelReason: { type: String, default: '' },
+    creditNoteId: { type: mongoose.Schema.Types.ObjectId, ref: 'CreditNote', default: null },
+    creditNoteNo: { type: String, default: '' },
 
     // RETAIL only: order-level payment tracking (B2B uses company running balance)
     paidAmount: { type: Number, default: 0 },
     status: { type: String, enum: ['UNPAID', 'PARTIAL', 'PAID'], default: 'UNPAID' },
 
-    // ---- Cancellation (req #2) ----
+    // ---- Cancellation (req #2, v32) ----
     // An order may be CANCELLED only AFTER its invoice has been generated. This is a soft
     // cancel (the record is kept for audit / invoice history), distinct from a hard Delete.
-    // Editing (req #1) is blocked once invoiceGenerated is true; cancelling once cancelled is true.
+    // Editing is blocked once invoiceGenerated is true; cancelling once cancelled is true.
     cancelled: { type: Boolean, default: false },
     cancelledAt: { type: Date, default: null },
     cancelReason: { type: String, default: '' },
+
+    // ---- Order Hold (req #1, v33) ----
+    // A pre-invoice working state: an order can be put On Hold and later released. An order on
+    // hold cannot have its invoice generated until it is released. Follows the same additive
+    // boolean pattern as `cancelled`, so the existing order workflow is extended, not duplicated.
+    onHold: { type: Boolean, default: false },
+    heldAt: { type: Date, default: null },
+    holdReason: { type: String, default: '' },
   },
   { timestamps: true }
 );
@@ -147,6 +172,17 @@ orderSchema.pre('save', function (next) {
 
 orderSchema.virtual('dueAmount').get(function () {
   return (this.totalAmount || 0) - (this.paidAmount || 0);
+});
+
+// req #1: a single, clear order lifecycle status for display. Priority reflects finality:
+// Cancelled > Invoice Cancelled > Invoiced > On Hold > Open. (Payment status UNPAID/PARTIAL/PAID
+// remains separate.)
+orderSchema.virtual('lifecycleStatus').get(function () {
+  if (this.cancelled) return 'CANCELLED';
+  if (this.invoiceCancelled) return 'INVOICE_CANCELLED';
+  if (this.invoiceGenerated) return 'INVOICED';
+  if (this.onHold) return 'ON_HOLD';
+  return 'OPEN';
 });
 orderSchema.set('toJSON', { virtuals: true });
 

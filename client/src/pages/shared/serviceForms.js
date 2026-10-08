@@ -56,6 +56,7 @@ const BUS = [
 
 // Event — its own simple form.
 const EVENT = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['eventTitle', 'Event Title'],
   ['eventDescription', 'Event Description'],
   ['country', 'Country'],
@@ -64,6 +65,7 @@ const EVENT = [
 
 // Visa — four fields.
 const VISA = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['visaCountry', 'Visa Country'],
   ['visaType', 'Visa Type', 'select', ['New', 'Renewal']],
   ['visaYears', 'Visa Years'],
@@ -72,6 +74,7 @@ const VISA = [
 
 // Cab — based on the ePrompt Transport Voucher (booking details only; amounts move to invoice).
 const CAB = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['serviceProvider', 'Service Provider'],
   ['guestName', 'Name of Guest'],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
@@ -102,6 +105,7 @@ const CAB = [
 
 // Hotel has a repeatable room-row section handled specially in the form component.
 const HOTEL = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['hotelName', 'Hotel Name', 'mname', 'property'],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
   ['adults', 'Adults', 'number'],

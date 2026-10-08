@@ -32,6 +32,18 @@ export default function OrderList() {
     }
   };
 
+  // req #1: put on hold / release. A held order cannot be invoiced until released.
+  const hold = async (e, o) => {
+    e.stopPropagation();
+    if (await confirm({ title: 'Put order on hold?', message: `Order ${o.orderNo} will be placed on hold and cannot be invoiced until released.` })) {
+      await api.put(`/retail/orders/${o._id}/hold`); load();
+    }
+  };
+  const release = async (e, o) => {
+    e.stopPropagation();
+    await api.put(`/retail/orders/${o._id}/release`); load();
+  };
+
   return (
     <div>
       <PageHeader eyebrow="Retail" title="Orders"
@@ -48,24 +60,38 @@ export default function OrderList() {
             <td className="td">
               {o.cancelled
                 ? <Badge status="UNPAID">Cancelled</Badge>
-                : o.invoiceGenerated
-                  ? <button onClick={() => nav(`${base}/invoices/${o._id}/generate`)} className="font-mono text-brand hover:underline">{o.invoiceNo}</button>
-                  : <button onClick={() => nav(`${base}/invoices/${o._id}/generate`)} className="btn-ghost btn-sm">Generate</button>}
+                : o.invoiceCancelled
+                  ? <Badge status="UNPAID">Invoice cancelled</Badge>
+                  : o.invoiceGenerated
+                    ? <button onClick={() => nav(`${base}/invoices/${o._id}/generate`)} className="font-mono text-brand hover:underline">{o.invoiceNo}</button>
+                    : o.onHold
+                      ? <Badge status="PARTIAL">On hold</Badge>
+                      : <button onClick={() => nav(`${base}/invoices/${o._id}/generate`)} className="btn-ghost btn-sm">Generate</button>}
             </td>
             <td className="td">{o.invoiceGenerated ? money(o.netInvoiceAmount) : '—'}</td>
             <td className="td">{new Date(o.createdAt).toLocaleDateString('en-IN')}</td>
             <td className="td">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button onClick={() => nav(`${base}/retail/orders/${o._id}`)} className="btn-ghost btn-sm">View</button>
                 {/* req #1: Edit only BEFORE an invoice exists (and not cancelled) */}
                 {!o.invoiceGenerated && !o.cancelled && (
                   <button onClick={() => nav(`${base}/retail/orders/${o._id}/edit`)} className="btn-ghost btn-sm">Edit</button>
                 )}
+                {/* req #1: Hold (pre-invoice) / Release */}
+                {!o.invoiceGenerated && !o.cancelled && !o.onHold && (
+                  <button onClick={(e) => hold(e, o)} className="btn-ghost btn-sm">Hold</button>
+                )}
+                {o.onHold && !o.cancelled && (
+                  <button onClick={(e) => release(e, o)} className="btn-ghost btn-sm">Release</button>
+                )}
                 {/* req #2: Cancel only AFTER an invoice exists (and not already cancelled) */}
                 {o.invoiceGenerated && !o.cancelled && (
                   <button onClick={(e) => cancel(e, o)} className="btn-danger btn-sm">Cancel</button>
                 )}
-                <button onClick={(e) => del(e, o)} className="btn-danger btn-sm">Delete</button>
+                {/* req #2: Delete hidden once an invoice exists or the order is cancelled */}
+                {!o.invoiceGenerated && !o.cancelled && (
+                  <button onClick={(e) => del(e, o)} className="btn-danger btn-sm">Delete</button>
+                )}
               </div>
             </td>
           </tr>

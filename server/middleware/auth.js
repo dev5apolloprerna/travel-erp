@@ -49,3 +49,28 @@ export const allow = (...roles) => (req, res, next) => {
   }
   next();
 };
+
+/**
+ * req #9: per-menu action permission check (Select/Read/Create/Edit/Delete/Export/Import).
+ * Enforced on the BACKEND so permissions can't be bypassed by hitting the URL/API directly.
+ *   - SUPER_ADMIN and legacy 'ALL' users: full access.
+ *   - COMPANY_OWNER: broad access, but NEVER delete (req #8) — invoice cancel is Super-Admin-only.
+ *   - EMPLOYEE: governed by their stored `permissions` matrix; legacy employees that only have
+ *     the old `menus` list fall back to full access on a granted menu (preserves prior behaviour).
+ */
+export const hasPermission = (user, menuKey, action) => {
+  if (!user) return false;
+  if (user.role === ROLES.SUPER_ADMIN) return true;
+  if ((user.menus || []).includes('ALL')) return true;
+  if (user.role === ROLES.COMPANY_OWNER) return action !== 'DELETE';
+  const perms = user.permissions && typeof user.permissions === 'object' ? user.permissions : null;
+  if (perms && Array.isArray(perms[menuKey])) return perms[menuKey].includes(action);
+  // Legacy fallback: before the matrix existed, having a menu implied full rights in it.
+  if ((user.menus || []).includes(menuKey)) return true;
+  return false;
+};
+
+export const can = (menuKey, action) => (req, res, next) => {
+  if (hasPermission(req.user, menuKey, action)) return next();
+  return res.status(403).json({ message: `Forbidden: you lack '${action}' permission for this menu.` });
+};

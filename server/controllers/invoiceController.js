@@ -3,6 +3,7 @@ import Customer from '../models/Customer.js';
 import Company from '../models/Company.js';
 import Settings from '../models/Settings.js';
 import Service from '../models/Service.js';
+import CreditNote from '../models/CreditNote.js';
 import { buildInvoicePdf, invoiceToBuffer } from '../utils/invoicePdf.js';
 import { sendMail } from '../utils/mailer.js';
 import { ownsOrg } from '../middleware/auth.js';
@@ -15,8 +16,16 @@ const footerFields = (t) => ({
   tdsAmount: t.tdsAmount,
   tcsAmount: t.tcsAmount,
   govtTaxAmount: t.govtTaxAmount,
+  serviceChargeAmount: t.serviceChargeAmount,   // req #7
   netInvoiceAmount: t.netInvoiceAmount,
 });
+
+// req #7: which party type this order bills (keeps the hierarchy distinction explicit).
+const billedToTypeFor = (order) => {
+  if (order.companyId) return 'B2B_COMPANY';
+  if (order.module === 'FIT' || order.societyPassenger?.passengerId) return 'SOCIETY';
+  return 'RETAIL_CUSTOMER';
+};
 
 // Load order + the party it's billed to (retail customer or B2B company)
 const loadInvoiceData = async (orderId) => {
@@ -131,8 +140,9 @@ export const computeInvoiceTotals = (charges = {}, footer = {}) => {
   const tdsAmount = num(footer.tdsAmount);
   const govtTaxAmount = num(footer.govtTaxAmount);
   const tcsAmount = num(footer.tcsAmount);
-  const netInvoiceAmount = num(grossTotal - discountAmount - tdsAmount - tcsAmount + govtTaxAmount);
-  return { charges: c, grossTotal, discountAmount, tdsAmount, govtTaxAmount, tcsAmount, netInvoiceAmount };
+  const serviceChargeAmount = num(footer.serviceChargeAmount);   // req #7
+  const netInvoiceAmount = num(grossTotal - discountAmount - tdsAmount - tcsAmount + govtTaxAmount + serviceChargeAmount);
+  return { charges: c, grossTotal, discountAmount, tdsAmount, govtTaxAmount, tcsAmount, serviceChargeAmount, netInvoiceAmount };
 };
 
 // GET /api/invoices/:orderId  -> order + party (works for retail/b2b/society)
@@ -162,6 +172,15 @@ export const generateInvoiceNo = async (req, res) => {
   const order = await Order.findById(req.params.orderId);
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
 
+  // req #1: an order on hold cannot be invoiced until released.
+  if (order.onHold)
+    return res.status(400).json({ message: 'This order is on hold. Release it before generating an invoice.' });
+  // req #2/#8: a cancelled order (or one whose invoice was cancelled) cannot be (re)invoiced.
+  if (order.cancelled)
+    return res.status(400).json({ message: 'This order has been cancelled and cannot be invoiced.' });
+  if (order.invoiceCancelled)
+    return res.status(400).json({ message: 'This invoice was cancelled (a credit note was raised) and cannot be regenerated.' });
+
   // Service-wise calculation. The service type comes from the order (not the client),
   // so each service always uses its own formula. Backend recalculates before saving.
   const serviceType = (order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
@@ -190,6 +209,7 @@ export const generateInvoiceNo = async (req, res) => {
   order.serviceCalcType = serviceType;
   order.totalAmount = order.netInvoiceAmount;   // keep legacy total in sync for lists/portal
   order.invoiceGenerated = true;
+  order.billedToType = billedToTypeFor(order);  // req #7: record the billed-party type
   // Direction is determined server-side, never from the client (req #4/#5). A customer Order
   // invoice is a SALES invoice (Company Owner / 360 selling to a customer); the 360 ← Main Company
   // PURCHASE invoice is the separate, Super-Admin-only SupplierInvoice module.
@@ -205,4 +225,54 @@ export const generateInvoiceNo = async (req, res) => {
     grossTotal: order.grossTotal,
     netInvoiceAmount: order.netInvoiceAmount,
   });
+};
+
+// POST /api/invoices/:orderId/cancel   { reason? }
+// req #8: SUPER_ADMIN-only. Cancels a generated invoice and raises a linked Credit Note.
+// The order/invoice record is never deleted — it stays for reporting/audit. The route is
+// guarded by allow(SUPER_ADMIN); this re-checks state and ownership.
+export const cancelInvoice = async (req, res) => {
+  const order = await Order.findById(req.params.orderId);
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  if (!order.invoiceGenerated)
+    return res.status(400).json({ message: 'This order has no generated invoice to cancel.' });
+  if (order.invoiceCancelled)
+    return res.status(400).json({ message: 'This invoice is already cancelled (a credit note exists).' });
+
+  // Raise the credit note against the cancelled invoice.
+  const creditNoteNo = await CreditNote.nextCreditNoteNo(order.organizationId);
+  const cn = await CreditNote.create({
+    organizationId: order.organizationId || null,
+    creditNoteNo,
+    orderId: order._id,
+    invoiceNo: order.invoiceNo || '',
+    invoiceDate: order.invoiceDate || null,
+    amount: order.netInvoiceAmount || 0,
+    reason: (req.body?.reason || '').toString().trim(),
+    createdBy: req.user?._id,
+  });
+
+  order.invoiceCancelled = true;
+  order.invoiceCancelledAt = new Date();
+  order.invoiceCancelReason = (req.body?.reason || '').toString().trim();
+  order.creditNoteId = cn._id;
+  order.creditNoteNo = cn.creditNoteNo;
+  await order.save();
+
+  res.json({
+    message: `Invoice ${order.invoiceNo} cancelled. Credit note ${cn.creditNoteNo} raised.`,
+    creditNote: cn,
+    invoiceNo: order.invoiceNo,
+  });
+};
+
+// GET /api/invoices/credit-notes  -> list credit notes (org-scoped), newest first.
+export const listCreditNotes = async (req, res) => {
+  const filter = {};
+  // Org-scope for non-super-admins (legacy/unset orgs left unrestricted, matching scopeToOrg).
+  if (req.user?.role !== 'SUPER_ADMIN' && req.user?.organizationId) filter.organizationId = req.user.organizationId;
+  const rows = await CreditNote.find(filter)
+    .populate('orderId', 'orderNo module')
+    .sort({ createdAt: -1 });
+  res.json(rows);
 };

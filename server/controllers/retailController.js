@@ -183,6 +183,37 @@ export const updateOrder = async (req, res) => {
   res.json(order);
 };
 
+// req #1: put an order ON HOLD (a pre-invoice working state). Only valid before an invoice
+// exists and while the order is not cancelled. A held order cannot be invoiced until released.
+export const holdOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  if (order.invoiceGenerated)
+    return res.status(400).json({ message: 'An order with a generated invoice cannot be put on hold.' });
+  if (order.cancelled)
+    return res.status(400).json({ message: 'A cancelled order cannot be put on hold.' });
+  if (order.onHold)
+    return res.status(400).json({ message: 'This order is already on hold.' });
+  order.onHold = true;
+  order.heldAt = new Date();
+  order.holdReason = (req.body?.reason || '').toString().trim();
+  await order.save();
+  res.json(order);
+};
+
+// req #1: release an order from hold back to the normal (Open) flow.
+export const releaseOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  if (!order.onHold)
+    return res.status(400).json({ message: 'This order is not on hold.' });
+  order.onHold = false;
+  order.heldAt = null;
+  order.holdReason = '';
+  await order.save();
+  res.json(order);
+};
+
 // req #2: cancellation is only allowed AFTER the invoice has been generated. Validated
 // on the actual order/invoice state (not just UI), so a direct request cannot bypass it.
 export const cancelOrder = async (req, res) => {
@@ -232,6 +263,13 @@ export const updateCustomer = async (req, res) => {
 export const deleteOrder = async (req, res) => {
   const existing = await Order.findById(req.params.id);
   if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Order not found' });
+  // req #2: once an order has a generated invoice or has been cancelled, it must NOT be deleted —
+  // it has to remain for reporting, audit, invoice and credit-note purposes. Enforced on the
+  // backend so it cannot be bypassed through a direct API call.
+  if (existing.invoiceGenerated)
+    return res.status(400).json({ message: 'An order with a generated invoice cannot be deleted (kept for audit/reporting).' });
+  if (existing.cancelled)
+    return res.status(400).json({ message: 'A cancelled order cannot be deleted (kept for audit/reporting).' });
   await Order.findByIdAndDelete(req.params.id);
   await Payment.deleteMany({ orderId: req.params.id });
   res.json({ message: 'Order deleted' });

@@ -25,12 +25,22 @@ export default function OrderDetail() {
       await api.put(`/retail/orders/${order._id}/cancel`); load();
     }
   };
+  // req #1: hold / release (pre-invoice).
+  const hold = async () => {
+    if (await confirm({ title: 'Put order on hold?', message: `Order ${order.orderNo} will be placed on hold and cannot be invoiced until released.` })) {
+      await api.put(`/retail/orders/${order._id}/hold`); load();
+    }
+  };
+  const release = async () => { await api.put(`/retail/orders/${order._id}/release`); load(); };
 
   return (
     <div className="max-w-3xl">
       <PageHeader eyebrow="Retail" title={`Order ${order.orderNo}`}
         actions={<div className="flex items-center gap-2">
           {order.cancelled && <Badge status="UNPAID">Cancelled</Badge>}
+          {order.invoiceCancelled && !order.cancelled && <Badge status="UNPAID">Invoice cancelled</Badge>}
+          {order.onHold && !order.cancelled && <Badge status="PARTIAL">On hold</Badge>}
+          {order.invoiceGenerated && !order.cancelled && !order.invoiceCancelled && <Badge status="PAID">Invoiced</Badge>}
           <Badge>{order.invoiceType || 'DOMESTIC'}</Badge>
         </div>} />
 
@@ -55,6 +65,12 @@ export default function OrderDetail() {
         {/* req #1/#2: same gating as the listing — Edit before invoice, Cancel after. */}
         {!order.invoiceGenerated && !order.cancelled && (
           <button onClick={() => nav(`${base}/retail/orders/${order._id}/edit`)} className="btn-primary">Edit order</button>
+        )}
+        {!order.invoiceGenerated && !order.cancelled && !order.onHold && (
+          <button onClick={hold} className="btn-ghost">Hold order</button>
+        )}
+        {order.onHold && !order.cancelled && (
+          <button onClick={release} className="btn-ghost">Release hold</button>
         )}
         {order.invoiceGenerated && !order.cancelled && (
           <button onClick={cancel} className="btn-danger">Cancel order</button>

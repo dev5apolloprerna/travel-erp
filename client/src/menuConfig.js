@@ -62,6 +62,7 @@ export const MENU = [
       { key: 'admin-employees', label: 'Team / Employees', to: '/app/admin/employees' },
       { key: 'admin-main-companies', label: 'Main Companies', to: '/app/org/main-companies' },
       { key: 'admin-supplier-invoices', label: 'Supplier Invoices', to: '/app/org/supplier-invoices' },
+      { key: 'admin-credit-notes', label: 'Credit Notes', to: '/app/invoices/credit-notes' },
       { key: 'admin-settings', label: 'Company Profile', to: '/app/settings/company' },
     ],
   },

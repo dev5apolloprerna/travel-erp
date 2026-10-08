@@ -58,6 +58,7 @@ import MemberPortal from './pages/portal/MemberPortal';
 
 import MainCompanies from './pages/org/MainCompanies';
 import SupplierInvoices from './pages/org/SupplierInvoices';
+import CreditNotes from './pages/invoice/CreditNotes';
 import OwnerLayout from './pages/owner/OwnerLayout';
 import OwnerDashboard from './pages/owner/OwnerDashboard';
 import MasterList from './pages/owner/MasterList';
@@ -172,6 +173,7 @@ export default function App() {
         <Route path="admin/employees" element={<EmployeeListAdmin />} />
         <Route path="org/main-companies" element={<MainCompanies />} />
         <Route path="org/supplier-invoices" element={<SupplierInvoices />} />
+        <Route path="invoices/credit-notes" element={<CreditNotes />} />
         <Route path="admin/employees/new" element={<EmployeeForm />} />
         <Route path="admin/employees/:id" element={<EmployeeForm />} />
         {/* Company Owner account management — Super Admin only (req #3) */}

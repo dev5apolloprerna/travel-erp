@@ -39,6 +39,13 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
     .text(`Order No: ${order.orderNo || '-'}`, { width: pageW - 310, align: 'right' })
     .text(`Type: ${order.invoiceType || 'DOMESTIC'}`, { width: pageW - 310, align: 'right' });
 
+  // req #8: mark a cancelled invoice (the record is kept; a credit note was raised).
+  if (order.invoiceCancelled) {
+    doc.fillColor('#c0392b').fontSize(10).font('Helvetica-Bold')
+      .text(`CANCELLED${order.creditNoteNo ? ` — Credit Note ${order.creditNoteNo}` : ''}`,
+        350, 128, { width: pageW - 310, align: 'right' });
+  }
+
   doc.moveTo(40, 140).lineTo(40 + pageW, 140).strokeColor('#e2e8f2').stroke();
 
   // ---------- Bill To ----------
@@ -68,6 +75,8 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
     line.sectorFrom && line.sectorTo ? `${line.sectorFrom} - ${line.sectorTo}` : '',
     line.ticketNo ? `Ticket: ${line.ticketNo}` : '',
     line.airlinePnr || line.railwayPnr ? `PNR: ${line.airlinePnr || line.railwayPnr}` : '',
+    // req #3-#6: PNR / Purchase Order unique number (Cab/Visa/Event/Hotel and any service).
+    line.pnrPoNumber ? `PNR/PO: ${line.pnrPoNumber}` : '',
     line.travelDate ? dt(line.travelDate) : '',
   ].filter(Boolean).join('  |  ');
   doc.fillColor(INK).fontSize(10).font('Helvetica-Bold').text('Service', 40, y);
@@ -125,6 +134,7 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
   if (order.tdsAmount) row('TDS', `- ${money(order.tdsAmount)}`);
   if (order.tcsAmount) row('TCS', `- ${money(order.tcsAmount)}`);
   if (order.govtTaxAmount) row('Govt Tax', `+ ${money(order.govtTaxAmount)}`);
+  if (order.serviceChargeAmount) row('360 Service Charge', `+ ${money(order.serviceChargeAmount)}`);  // req #7
   doc.moveTo(labelX, y).lineTo(40 + pageW, y).strokeColor('#e2e8f2').stroke();
   y += 6;
   row('Net Invoice Amount', money(order.netInvoiceAmount), true);

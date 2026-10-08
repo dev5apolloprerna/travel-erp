@@ -1224,3 +1224,85 @@ Seven changes, all built on the v31 code and reusing existing models/controllers
   manager role was introduced since the role/permission structure already models approvers this way.
 - The supplier-invoice PDF reuses the customer-invoice template; the Main Company (supplier) is shown as
   the billing party and the document is typed PURCHASE.
+
+---
+
+## v33 — Order hold, delete-lock, booking PNR/PO, hierarchy service charge, invoice cancel + credit note, permission matrix
+
+Nine changes, built on v32, reusing existing models/controllers/components. Inspection-first; two
+items were clarified before coding (service-charge mechanic = manual at billing time; permissions =
+replace the flat menu list with a per-menu 7-action matrix).
+
+### 1. Order Hold
+- `models/Order.js`: added `onHold`/`heldAt`/`holdReason` (additive) + a `lifecycleStatus` virtual
+  (Cancelled > Invoice Cancelled > Invoiced > On Hold > Open) for a clear single status.
+- `controllers/retailController.js` `holdOrder`/`releaseOrder` + routes `PUT /retail/orders/:id/hold`
+  and `/release`. A held order cannot be invoiced — `invoiceController.generateInvoiceNo` 400s while
+  `onHold`. UI: Hold/Release buttons and an "On hold" badge on the listing and detail pages.
+
+### 2. No delete after invoice / cancellation
+- `deleteOrder` now 400s when `invoiceGenerated` or `cancelled` (kept for audit/reporting; never
+  physically removed). The Delete button is hidden in those states on the listing.
+
+### 3–6. PNR / Purchase Order Unique Number (Cab, Visa, Event, Hotel)
+- The four services share the common `serviceLineSchema` (strict:false) + the shared form system, so
+  one reusable field key `pnrPoNumber` was added to CAB/VISA/EVENT/HOTEL in `shared/serviceForms.js`.
+  Stored automatically, shown automatically on the order detail (via `formFor`), and printed on the
+  invoice PDF detail line. No new tables/fields per service.
+
+### 7. 360 → Company Owner → Employee → Customer/B2B/Society billing + service charge
+- Service-charge mechanic is **manual at billing time** (per your answer): added a manual
+  `serviceChargeAmount` to the invoice footer in `invoiceCalc.js` (client + server),
+  `invoiceController.computeInvoiceTotals`, the Order model, the Generate screen and the PDF.
+  Net = Gross − Discount − TDS − TCS + Govt Tax **+ Service Charge** (defaults to 0, so existing
+  invoices are unchanged).
+- The hierarchy distinction is recorded on each invoice via `billedToType`
+  (RETAIL_CUSTOMER / B2B_COMPANY / SOCIETY), stamped server-side at generation. Roles
+  (SUPER_ADMIN / COMPANY_OWNER / EMPLOYEE) and the existing org layer already separate the actors.
+
+### 8. Invoice cancellation + Credit Note (Super Admin only)
+- New `models/CreditNote.js` (CN-###### per org, references the order + a snapshot of the cancelled
+  invoice). `invoiceController.cancelInvoice` + `POST /invoices/:orderId/cancel`, guarded by
+  `allow(SUPER_ADMIN)` — a Company Owner/Employee cannot cancel even via a direct API call.
+  Cancelling flags the order (`invoiceCancelled`, `creditNoteNo`) and raises the linked credit note;
+  the original invoice/order is never deleted. New `GET /invoices/credit-notes` + a Credit Notes page.
+  The PDF shows a "CANCELLED — Credit Note …" stamp.
+
+### 9. Menu-wise 7-action permission matrix
+- `models/User.js`: added `permissions` (`{ menuKey: ['SELECT','READ','CREATE','EDIT','DELETE',
+  'EXPORT','IMPORT'] }`) and `PERMISSION_ACTIONS`; `menus` is now **derived** from it on save so the
+  existing sidebar keeps working. `EmployeeForm.jsx`: the old flat menu checklist is replaced by a
+  per-menu action matrix (column/row/all toggles).
+- Backend enforcement: `middleware/auth.js` `hasPermission`/`can(menuKey, action)`. Applied to the
+  retail order routes (create=CREATE, edit/hold/release/cancel=EDIT, delete=DELETE). Super Admin
+  bypasses; Company Owner may create/edit but never DELETE (req #8); employees are governed by their
+  matrix; legacy employees (menus only, no matrix) fall back to full access on a granted menu so
+  nothing breaks. Invoice cancel stays Super-Admin-only via the route guard.
+
+### Database changes (all additive, backward-compatible)
+- Order: `onHold, heldAt, holdReason, serviceChargeAmount, billedToType, invoiceCancelled,
+  invoiceCancelledAt, invoiceCancelReason, creditNoteId, creditNoteNo` + `lifecycleStatus` virtual.
+- User: `permissions`.
+- New collection: `creditnotes` (created on first credit note). No migrations needed; no data touched.
+
+### New / changed routes
+- `PUT /api/retail/orders/:id/hold`, `PUT /api/retail/orders/:id/release`
+- `POST /api/invoices/:orderId/cancel` (Super Admin only), `GET /api/invoices/credit-notes`
+- Permission checks added to `POST/PUT/DELETE /api/retail/orders*`.
+
+### Verified
+- `vite build` OK (164 modules). `node --check` + ESM import OK on every changed/new server file.
+  Router stacks confirm the new endpoints (hold/release/cancel, credit-notes, invoice cancel).
+- `owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` / `server/package.json` — untouched.
+- Seeder remains non-destructive (v32); no new destructive operations introduced.
+
+### Assumptions
+- #7: with "manual at billing time", the 360 service charge is a manual footer amount included in
+  the net; `billedToType` records the party distinction. No automatic commission/margin was invented.
+- #9: the per-menu matrix is enforced on the Orders routes (the spec's worked example) and invoice
+  cancel (SA-only); the same `can()` guard can be extended to other menus' routes identically. The
+  reference screenshot wasn't provided, so the matrix follows the exact 7 actions listed in the spec.
+
+### Remaining / notes
+- Backend action-permission enforcement is wired on the Order (and invoice-cancel) routes as the
+  concrete example; extending `can()` to every other module's routes is mechanical and can follow.
