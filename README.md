@@ -1306,3 +1306,107 @@ replace the flat menu list with a per-menu 7-action matrix).
 ### Remaining / notes
 - Backend action-permission enforcement is wired on the Order (and invoice-cancel) routes as the
   concrete example; extending `can()` to every other module's routes is mechanical and can follow.
+
+---
+
+## v34 — Permission matrix "All"-first, form validation messages, scrolling, and real permission enforcement
+
+Four fixes to the v33 permission work, done in the existing architecture (no rebuild).
+
+### 1. "All" is the first permission column
+- `admin/EmployeeForm.jsx`: in the menu permission matrix the per-row **All** toggle now renders as
+  the first column (before Select/Read/Create/Edit/Delete/Export/Import). It still selects/clears
+  every action for the row and stays in sync; the column header toggles and "Grant all"/"Clear all"
+  are unchanged.
+
+### 2. Validation / error messages are shown
+- Forms that previously swallowed errors now surface them in a visible alert and keep the entered
+  values: `admin/EmployeeForm.jsx`, `hr/HolidayMaster.jsx`, `masters/{Cluster,Division,Grade,
+  Department,Service}Master.jsx`, `retail/CustomerList.jsx`. Server messages (e.g. a 403 from a
+  permission check, or "Email already in use") are displayed; no stack traces/SQL are exposed.
+
+### 3. Horizontal + vertical scrolling
+- `components/ui/index.jsx` `Table`: the wrapper was `overflow-hidden` (which **clipped** wide
+  tables); it is now `overflow-x-auto`, so every wide table — and the permission matrix — scrolls
+  horizontally instead of hiding columns/action controls. The app shell's `main` already scrolls
+  vertically, so long pages/tables remain usable; no nested scroll traps were introduced.
+
+### 4. Permission enforcement (Holiday Master regression + consistent rollout)
+Root cause: list screens rendered Edit/Delete unconditionally and the mutating routes were guarded
+only by role (`allow(EMPLOYEE, SUPER_ADMIN)`), never by the per-action matrix — so a Select/Read
+user saw the buttons and could call the endpoints directly.
+- **Frontend:** added `can(menuKey, action)` to `AuthContext` (mirrors the backend exactly:
+  SUPER_ADMIN/`ALL` full; COMPANY_OWNER all-but-DELETE; EMPLOYEE by matrix; legacy employees fall
+  back to menu access). Action controls are now gated on: Holiday Master (the regression), the
+  Society masters (Cluster/Division/Grade/Department), Service Master, Customers, and FAQ &
+  Testimonials. Edit/Delete/Create appear only when the user holds that action.
+- **Backend:** applied `can(menuKey, action)` to the mutating routes for holidays (`hr-holidays`),
+  FIT masters/doctors/employees/orders, services (`admin-services`), CMS
+  (categories/destinations/packages/`cms-content`), retail customers, and B2B companies. Reads stay
+  open to anyone who can see the menu; Super Admin bypasses; a direct API call without the action is
+  rejected 403. (Retail orders + invoice-cancel were already enforced in v33.)
+- **Regression check (Holiday Master):** with only Select + Read granted, the Add/Edit form is
+  hidden, the row Edit/Delete actions are not rendered, and `PUT/DELETE /api/hr/holidays/:id` return
+  403 — while the list remains viewable.
+
+### Files changed
+- client: `context/AuthContext.jsx`, `components/ui/index.jsx`, `pages/admin/EmployeeForm.jsx`,
+  `pages/hr/HolidayMaster.jsx`, `pages/masters/{Cluster,Division,Grade,Department,Service}Master.jsx`,
+  `pages/retail/CustomerList.jsx`, `pages/cms/ContentMaster.jsx`.
+- server: `middleware/auth.js` (already had `can`), `routes/{hr,fit,service,cms,retail,b2b}Routes.js`.
+- No model/DB/migration changes; no data touched; seeder unchanged.
+
+### Verified
+- `vite build` OK (164 modules); `node --check` + ESM import OK on all changed server routes.
+- `owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` / `server/package.json` — untouched.
+
+### Assumptions / notes
+- Each screen maps to its existing menu key (e.g. Holiday Master → `hr-holidays`). The same two-line
+  `can()` gate + route guard pattern is applied consistently and can be extended to any remaining
+  list screen (e.g. Doctor/Society-member lists, which are already enforced server-side) identically.
+- Reads (list/detail) are governed by menu visibility, not a separate READ gate, matching the
+  existing design; mutations are the actions enforced per the matrix.
+
+---
+
+## v35 — Order-permission gating for "Book Now" / "Order" actions (Retail Customers + Companies)
+
+**Root cause.** When the Orders permission (`retail-orders`, labelled "Orders") is removed from an
+employee, `visibleMenu` correctly hides the Orders menu (and drops the empty parent), but the
+order-creation actions on the Retail Customer listing and the Companies listing were rendered
+unconditionally and keyed off nothing — and the B2B order route had no per-action guard. So the
+buttons stayed visible and `POST /api/b2b/orders` was reachable directly.
+
+**Fix (uses the existing `can()` helper + `retail-orders` key — no new key invented).** The app has a
+single Orders permission key (`retail-orders`); there is no separate B2B-orders menu, so the same key
+governs order creation on both screens, applied identically per the spec.
+
+- `retail/CustomerList.jsx`: "Book now" now requires `retail-orders` **CREATE**; the "Orders" button
+  requires `retail-orders` **READ/SELECT**. Customer Edit/Delete stay on their own `retail-customers`
+  permission (unchanged from v34).
+- `b2b/CompanyList.jsx`: header "New booking" and the row "Book" require `retail-orders` **CREATE**.
+  "New company" / "Open" / company Edit/Delete are left as-is (not order actions).
+- `b2b/CompanyDetail.jsx` (Booking history tab): "+ New booking" requires `retail-orders` **CREATE**.
+  Also passed the shell `base` into `OrdersTab` (it was out of scope), so the gated button — and the
+  tab's invoice links — resolve correctly for authorized users.
+- `routes/b2bRoutes.js`: `POST /orders` now guarded by `can('retail-orders','CREATE')` — a direct
+  request without the Orders permission is rejected 403 even when the button is hidden. (Retail order
+  creation was already guarded in v33; FIT in v34.)
+
+**Frontend vs backend.** Visibility is enforced in the UI via the shared `can(menuKey, action)`
+(AuthContext), which mirrors the server exactly; authorization is enforced on the server via the
+`can()` middleware on the order-creation routes, so hidden buttons can't be bypassed by URL/API.
+
+**Menu (#1).** No change needed — `visibleMenu` already hides `retail-orders` when it has no granted
+action and drops a parent section whose children are all inaccessible. Verified by inspection.
+
+**Files changed:** `client/src/pages/retail/CustomerList.jsx`, `client/src/pages/b2b/CompanyList.jsx`,
+`client/src/pages/b2b/CompanyDetail.jsx`, `server/routes/b2bRoutes.js`.
+
+**Verified:** `vite build` OK (164 modules); `node --check` + import OK on `b2bRoutes.js`.
+`owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` / `server/package.json` — untouched. No DB/model
+changes.
+
+**Assumption:** B2B order actions use the existing `retail-orders` ("Orders") permission because the
+application has no separate B2B-orders menu/permission key; this matches the report that removing the
+single Order permission must hide Book/Order on both listings.

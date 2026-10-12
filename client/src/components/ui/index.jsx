@@ -58,7 +58,9 @@ export function Badge({ status, children }) {
 
 export function Table({ head, children }) {
   return (
-    <div className="card overflow-hidden">
+    // overflow-x-auto (not hidden) so wide tables scroll horizontally instead of clipping
+    // columns / action controls on narrow viewports (req #3).
+    <div className="card overflow-x-auto">
       <table className="w-full">
         <thead className="border-b border-line bg-canvas">
           <tr>{head.map((h) => <th key={h} className="th">{h}</th>)}</tr>

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import ImageUpload from '../../components/ui/ImageUpload';
 import { PageHeader, Field, Input, Textarea, Table, EmptyRow, RowActions, Badge, Modal, Tabs } from '../../components/ui';
+
+const MENU = 'cms-content';   // permission key (req #4)
 
 /** FAQ and testimonial masters for the public website. */
 export default function ContentMaster() {
@@ -23,6 +26,8 @@ const blankFaq = { question: '', answer: '', category: 'General', displayOrder: 
 
 function Faqs() {
   const confirm = useConfirm();
+  const { can } = useAuth();
+  const canCreate = can(MENU, 'CREATE'), canEdit = can(MENU, 'EDIT'), canDelete = can(MENU, 'DELETE');
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState(null);
   const [editId, setEditId] = useState(null);
@@ -45,9 +50,11 @@ function Faqs() {
 
   return (
     <>
-      <div className="mb-3">
-        <button onClick={() => { setForm({ ...blankFaq }); setEditId(null); setError(''); }} className="btn-primary">Add FAQ</button>
-      </div>
+      {canCreate && (
+        <div className="mb-3">
+          <button onClick={() => { setForm({ ...blankFaq }); setEditId(null); setError(''); }} className="btn-primary">Add FAQ</button>
+        </div>
+      )}
 
       <Table head={['Question', 'Category', 'Order', 'Status', 'Actions']}>
         {rows.length === 0 && <EmptyRow span={5} text="No FAQs yet. Add the questions travellers ask most." />}
@@ -57,7 +64,7 @@ function Faqs() {
             <td className="td">{r.category}</td>
             <td className="td">{r.displayOrder}</td>
             <td className="td"><Badge status={r.isActive ? 'PAID' : 'UNPAID'}>{r.isActive ? 'Live' : 'Hidden'}</Badge></td>
-            <td className="td"><RowActions onEdit={() => { setForm({ ...blankFaq, ...r }); setEditId(r._id); setError(''); }} onDelete={() => del(r)} /></td>
+            <td className="td"><RowActions onEdit={canEdit ? () => { setForm({ ...blankFaq, ...r }); setEditId(r._id); setError(''); } : undefined} onDelete={canDelete ? () => del(r) : undefined} /></td>
           </tr>
         ))}
       </Table>
@@ -91,6 +98,8 @@ const blankT = { name: '', location: '', photo: '', rating: 5, message: '', pack
 
 function Testimonials() {
   const confirm = useConfirm();
+  const { can } = useAuth();
+  const canCreate = can(MENU, 'CREATE'), canEdit = can(MENU, 'EDIT'), canDelete = can(MENU, 'DELETE');
   const [rows, setRows] = useState([]);
   const [packages, setPackages] = useState([]);
   const [form, setForm] = useState(null);
@@ -117,9 +126,11 @@ function Testimonials() {
 
   return (
     <>
-      <div className="mb-3">
-        <button onClick={() => { setForm({ ...blankT }); setEditId(null); setError(''); }} className="btn-primary">Add testimonial</button>
-      </div>
+      {canCreate && (
+        <div className="mb-3">
+          <button onClick={() => { setForm({ ...blankT }); setEditId(null); setError(''); }} className="btn-primary">Add testimonial</button>
+        </div>
+      )}
 
       <Table head={['Name', 'Location', 'Rating', 'Package', 'Order', 'Status', 'Actions']}>
         {rows.length === 0 && <EmptyRow span={7} text="No testimonials yet. Add feedback from happy travellers." />}
@@ -133,11 +144,11 @@ function Testimonials() {
             <td className="td"><Badge status={r.isActive ? 'PAID' : 'UNPAID'}>{r.isActive ? 'Live' : 'Hidden'}</Badge></td>
             <td className="td">
               <RowActions
-                onEdit={() => {
+                onEdit={canEdit ? () => {
                   setForm({ ...blankT, ...r, packageId: r.packageId?._id || r.packageId || '', travelDate: r.travelDate ? String(r.travelDate).slice(0, 10) : '' });
                   setEditId(r._id); setError('');
-                }}
-                onDelete={() => del(r)} />
+                } : undefined}
+                onDelete={canDelete ? () => del(r) : undefined} />
             </td>
           </tr>
         ))}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import {
   PageHeader, Card, StatCard, Table, EmptyRow, RowActions, Tabs, Modal,
@@ -56,7 +57,7 @@ export default function CompanyDetail() {
       {tab === 'documents' && <DocumentsTab id={id} documents={company.documents || []} onChange={load} />}
       {tab === 'members' && <MembersTab id={id} members={members} confirm={confirm} onChange={load} />}
       {tab === 'payments' && <PaymentsTab id={id} payments={payments} orders={orders} outstanding={outstanding} onChange={load} />}
-      {tab === 'orders' && <OrdersTab orders={orders} companyId={id} />}
+      {tab === 'orders' && <OrdersTab orders={orders} companyId={id} base={base} />}
     </div>
   );
 }
@@ -314,8 +315,10 @@ function PaymentsTab({ id, payments, orders = [], outstanding, onChange }) {
 }
 
 // ---------- Booking history tab ----------
-function OrdersTab({ orders, companyId }) {
+function OrdersTab({ orders, companyId, base }) {
   const nav = useNavigate();
+  const { can } = useAuth();
+  const canBookOrder = can('retail-orders', 'CREATE');   // Orders permission (same as the listings)
   const download = async (o) => {
     const res = await api.get(`/invoices/${o._id}/pdf`, { responseType: 'blob' });
     const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
@@ -327,11 +330,13 @@ function OrdersTab({ orders, companyId }) {
 
   return (
     <Card title="Booking history">
-      <div className="mb-3">
-        <button onClick={() => nav(`${base}/b2b/orders/new?company=${companyId}`)} className="btn-primary btn-sm">
-          + New booking
-        </button>
-      </div>
+      {canBookOrder && (
+        <div className="mb-3">
+          <button onClick={() => nav(`${base}/b2b/orders/new?company=${companyId}`)} className="btn-primary btn-sm">
+            + New booking
+          </button>
+        </div>
+      )}
       <Table head={['Order', 'Type', 'Requested by', 'Services', 'Invoice', 'Net amount', 'Date']}>
         {orders.length === 0 && <EmptyRow span={7} text="No orders yet." />}
         {orders.map((o) => (

@@ -11,10 +11,10 @@ const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER);
 const staffOrCustomer = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER, ROLES.RETAIL_CUSTOMER);
 
 r.get('/customers', protect, staff, c.listCustomers);
-r.post('/customers', protect, staff, c.createCustomer);
+r.post('/customers', protect, staff, can('retail-customers', 'CREATE'), c.createCustomer);
 r.get('/customers/:id', protect, staff, c.getCustomer);
-r.put('/customers/:id', protect, staff, c.updateCustomer);
-r.delete('/customers/:id', protect, staff, c.deleteCustomer);
+r.put('/customers/:id', protect, staff, can('retail-customers', 'EDIT'), c.updateCustomer);
+r.delete('/customers/:id', protect, staff, can('retail-customers', 'DELETE'), c.deleteCustomer);
 // customer documents (any type)
 r.post('/customers/:id/documents', protect, staff, toFolder('customers'), upload.single('file'), c.addCustomerDocument);
 r.delete('/customers/:id/documents/:docId', protect, staff, c.deleteCustomerDocument);

@@ -19,6 +19,7 @@ export default function EmployeeForm() {
   const base = useShellBase();
   const [services, setServices] = useState([]);
   const [opts, setOpts] = useState({ city: [], department: [], designation: [] });
+  const [error, setError] = useState('');
   const [form, setForm] = useState({
     name: '', email: '', phone: '', password: '', employeeTypes: ['DOMESTIC'],
     menus: [], permissions: {}, modules: [], services: [], isActive: true, hr: {},
@@ -92,16 +93,26 @@ export default function EmployeeForm() {
   const clearAllPerms = () => setForm((f) => ({ ...f, permissions: {} }));
 
   const save = async () => {
+    setError('');
+    if (!form.name.trim()) return setError('Full name is required.');
+    if (!form.email.trim()) return setError('Email is required.');
+    if (!editing && !form.password) return setError('A password is required for a new employee.');
     // Derive menu visibility from the action matrix (a menu is visible if it has any action).
     const payload = { ...form, menus: Object.keys(form.permissions).filter((k) => (form.permissions[k] || []).length) };
-    if (editing) await api.put(`/auth/employees/${id}`, payload);
-    else await api.post('/auth/employees', payload);
-    nav(`${base}/admin/employees`);
+    try {
+      if (editing) await api.put(`/auth/employees/${id}`, payload);
+      else await api.post('/auth/employees', payload);
+      nav(`${base}/admin/employees`);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not save the employee.');
+    }
   };
 
   return (
     <div className="max-w-3xl">
       <PageHeader eyebrow="Administration" title={editing ? 'Edit employee' : 'Create employee'} />
+
+      {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
       <Card title="Employee details" className="mb-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -203,10 +214,12 @@ export default function EmployeeForm() {
           <button type="button" onClick={clearAllPerms} className="btn-ghost btn-sm">Clear all</button>
         </div>
         <div className="-mx-1 overflow-x-auto">
-          <table className="w-full min-w-[620px] px-1 text-sm">
+          <table className="w-full min-w-[680px] px-1 text-sm">
             <thead>
               <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-muted">
                 <th className="py-2 pr-2 font-semibold">Menu</th>
+                {/* req #1: "All" is the first permission column, before Select/Read/… */}
+                <th className="px-1 py-2 text-center font-semibold">All</th>
                 {ACTIONS.map((a) => (
                   <th key={a} className="px-1 py-2 text-center font-semibold">
                     <button type="button" onClick={() => toggleActionColumn(a)} className="hover:text-brand" title={`Toggle ${a} for all menus`}>
@@ -214,24 +227,24 @@ export default function EmployeeForm() {
                     </button>
                   </th>
                 ))}
-                <th className="px-1 py-2 text-center font-semibold">All</th>
               </tr>
             </thead>
             <tbody>
               {MENU_KEYS.map((it) => (
                 <tr key={it.key} className="border-b border-subtle">
                   <td className="py-1.5 pr-2 text-ink-soft">{it.label}</td>
-                  {ACTIONS.map((a) => (
-                    <td key={a} className="px-1 py-1.5 text-center">
-                      <input type="checkbox" checked={hasAction(it.key, a)} onChange={() => toggleAction(it.key, a)} />
-                    </td>
-                  ))}
+                  {/* req #1: row "All" toggle first — selects/clears every action and stays in sync. */}
                   <td className="px-1 py-1.5 text-center">
                     <input
                       type="checkbox"
                       checked={ACTIONS.every((a) => hasAction(it.key, a))}
                       onChange={() => toggleMenuRow(it.key)} />
                   </td>
+                  {ACTIONS.map((a) => (
+                    <td key={a} className="px-1 py-1.5 text-center">
+                      <input type="checkbox" checked={hasAction(it.key, a)} onChange={() => toggleAction(it.key, a)} />
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
