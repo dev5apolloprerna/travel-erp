@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { PageHeader, Table, EmptyRow, Badge, money, Input } from '../../components/ui';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { useShellBase } from '../../hooks/useShellBase';
 
+const MENU = 'retail-orders';   // permission key (req #4)
+
 export default function OrderList() {
+  const { can } = useAuth();
+  // req #4: every action is shown only when the user holds the matching permission. The backend
+  // (v33) already enforces create/edit/delete on the order routes — this keeps the UI consistent.
+  const canCreate = can(MENU, 'CREATE');
+  const canView = can(MENU, 'READ') || can(MENU, 'SELECT');
+  const canEdit = can(MENU, 'EDIT');
+  const canDelete = can(MENU, 'DELETE');
   const [orders, setOrders] = useState([]);
   const [params] = useSearchParams();
   const nav = useNavigate();
@@ -47,7 +57,7 @@ export default function OrderList() {
   return (
     <div>
       <PageHeader eyebrow="Retail" title="Orders"
-        actions={<Link to={`${base}/retail/orders/new`} className="btn-primary">New order</Link>} />
+        actions={canCreate ? <Link to={`${base}/retail/orders/new`} className="btn-primary">New order</Link> : null} />
 
       <Table head={['Order', 'Customer', 'Type', 'Services', 'Invoice', 'Net amount', 'Date', 'Actions']}>
         {orders.length === 0 && <EmptyRow span={8} text="No orders found." />}
@@ -72,24 +82,25 @@ export default function OrderList() {
             <td className="td">{new Date(o.createdAt).toLocaleDateString('en-IN')}</td>
             <td className="td">
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => nav(`${base}/retail/orders/${o._id}`)} className="btn-ghost btn-sm">View</button>
-                {/* req #1: Edit only BEFORE an invoice exists (and not cancelled) */}
-                {!o.invoiceGenerated && !o.cancelled && (
+                {/* req #4: each action also requires the matching Order permission. */}
+                {canView && <button onClick={() => nav(`${base}/retail/orders/${o._id}`)} className="btn-ghost btn-sm">View</button>}
+                {/* Edit only BEFORE an invoice exists (and not cancelled), and with EDIT permission */}
+                {canEdit && !o.invoiceGenerated && !o.cancelled && (
                   <button onClick={() => nav(`${base}/retail/orders/${o._id}/edit`)} className="btn-ghost btn-sm">Edit</button>
                 )}
-                {/* req #1: Hold (pre-invoice) / Release */}
-                {!o.invoiceGenerated && !o.cancelled && !o.onHold && (
+                {/* Hold (pre-invoice) / Release — needs EDIT permission */}
+                {canEdit && !o.invoiceGenerated && !o.cancelled && !o.onHold && (
                   <button onClick={(e) => hold(e, o)} className="btn-ghost btn-sm">Hold</button>
                 )}
-                {o.onHold && !o.cancelled && (
+                {canEdit && o.onHold && !o.cancelled && (
                   <button onClick={(e) => release(e, o)} className="btn-ghost btn-sm">Release</button>
                 )}
-                {/* req #2: Cancel only AFTER an invoice exists (and not already cancelled) */}
-                {o.invoiceGenerated && !o.cancelled && (
+                {/* Cancel only AFTER an invoice exists (and not already cancelled) — needs EDIT */}
+                {canEdit && o.invoiceGenerated && !o.cancelled && (
                   <button onClick={(e) => cancel(e, o)} className="btn-danger btn-sm">Cancel</button>
                 )}
-                {/* req #2: Delete hidden once an invoice exists or the order is cancelled */}
-                {!o.invoiceGenerated && !o.cancelled && (
+                {/* Delete hidden once an invoice exists or the order is cancelled — needs DELETE */}
+                {canDelete && !o.invoiceGenerated && !o.cancelled && (
                   <button onClick={(e) => del(e, o)} className="btn-danger btn-sm">Delete</button>
                 )}
               </div>

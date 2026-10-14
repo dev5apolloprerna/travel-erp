@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as c from '../controllers/cmsController.js';
 import * as wb from '../controllers/websiteBookingController.js';
+import * as wm from '../controllers/websiteMasterController.js';
 import { listInquiries, deleteInquiry } from '../controllers/publicController.js';
 import { protect, allow, can } from '../middleware/auth.js';
 import { ROLES } from '../models/User.js';
@@ -59,5 +60,26 @@ r.post('/bookings/:id/fulfil', wb.fulfilManually);
 // ---- Website inquiries (Super Admin) ----
 r.get('/inquiries', listInquiries);
 r.delete('/inquiries/:id', deleteInquiry);
+
+// ---- v39 Website masters (gated by the per-menu permission matrix) ----
+r.get('/banners', wm.listBanners);
+r.post('/banners', can('cms-banners', 'CREATE'), wm.createBanner);
+r.put('/banners/:id', can('cms-banners', 'EDIT'), wm.updateBanner);
+r.delete('/banners/:id', can('cms-banners', 'DELETE'), wm.deleteBanner);
+
+r.get('/videos', wm.listVideos);
+r.post('/videos', can('cms-videos', 'CREATE'), wm.createVideo);
+r.put('/videos/:id', can('cms-videos', 'EDIT'), wm.updateVideo);
+r.delete('/videos/:id', can('cms-videos', 'DELETE'), wm.deleteVideo);
+
+r.get('/team', wm.listTeam);
+r.post('/team', can('cms-team', 'CREATE'), wm.createTeam);
+r.put('/team/:id', can('cms-team', 'EDIT'), wm.updateTeam);
+r.delete('/team/:id', can('cms-team', 'DELETE'), wm.deleteTeam);
+
+// Travel Inspiration + Customize Trip (admin listings; read-only here)
+r.get('/travel-inspirations', wm.listTravelInspirations);
+r.get('/customize-trips', wm.listCustomizeTrips);
+r.get('/customize-trips/:id', wm.getCustomizeTrip);
 
 export default r;

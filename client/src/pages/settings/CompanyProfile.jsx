@@ -36,7 +36,7 @@ export default function CompanyProfile() {
   if (!form) return <div className="text-ink-muted">Loading…</div>;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <PageHeader eyebrow="Administration" title="Company Profile Settings"
         actions={<button onClick={save} className="btn-primary">Save settings</button>} />
 

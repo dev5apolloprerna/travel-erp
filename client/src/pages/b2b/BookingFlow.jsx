@@ -69,7 +69,7 @@ export default function BookingFlow() {
   };
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-5xl">
       <PageHeader eyebrow="B2B" title="New company booking" />
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 

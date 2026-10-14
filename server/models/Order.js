@@ -86,6 +86,9 @@ const orderSchema = new mongoose.Schema(
     // Hotel per-room breakdown (Rate × Rooms + Tax%).
     invoiceRooms: { type: [mongoose.Schema.Types.Mixed], default: undefined },
     serviceCalcType: { type: String, default: '' },     // which calculator was used
+    // Package orders (isPackage): per-service amount breakdown entered at invoice generation.
+    // Each: { serviceType, description, amount }. Gross = sum of amounts; footer applies as usual.
+    invoicePackageLines: { type: [mongoose.Schema.Types.Mixed], default: undefined },
     chargesTotal: { type: Number, default: 0 },
     markupTotal: { type: Number, default: 0 },
     hotelTotalRoomAmount: { type: Number, default: 0 },

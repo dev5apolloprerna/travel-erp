@@ -2,6 +2,13 @@ import './masterOverrides.js';            // apply v17 overrides (enums, Company
 import './masterDetails.js';              // v25: detail masters + additive Account/Hotel fields
 import { MASTERS } from './masterDefs.js';
 import { modelForMaster } from './MasterRecord.js';
+import { logActivity, diffFields } from '../utils/activityLog.js';
+
+// Human-friendly label for a master record (its title field, falling back to the id).
+const labelOfRow = (def, row) => {
+  const v = row?.[def.titleField];
+  return (v === undefined || v === null || v === '') ? String(row?._id ?? '') : String(v);
+};
 
 const defOr404 = (key, res) => {
   const def = MASTERS[key];
@@ -131,6 +138,12 @@ export const create = async (req, res) => {
   const { values, errors } = pickFields(def, req.body);
   if (errors.length) return res.status(400).json({ message: errors[0], errors });
   const doc = await modelForMaster(def.key).create(values);
+  // Log master-data creation (req #4 — covers Account/Airline/Bus/Hotel records and every master).
+  await logActivity(req, {
+    action: 'CREATE', module: 'Master', recordId: doc._id,
+    recordLabel: labelOfRow(def, doc.toObject ? doc.toObject() : doc),
+    message: `${def.label} created`, meta: { master: def.label, key: def.key },
+  });
   res.status(201).json(doc);
 };
 
@@ -140,8 +153,17 @@ export const update = async (req, res) => {
   if (!def) return;
   const { values, errors } = pickFields(def, req.body);
   if (errors.length) return res.status(400).json({ message: errors[0], errors });
-  const row = await modelForMaster(def.key).findByIdAndUpdate(req.params.id, values, { new: true });
+  const Model = modelForMaster(def.key);
+  const before = await Model.findById(req.params.id).lean();      // capture previous values for the diff
+  const row = await Model.findByIdAndUpdate(req.params.id, values, { new: true });
   if (!row) return res.status(404).json({ message: 'Record not found' });
+  // Log master-data update with a field-level before/after diff (req #4).
+  await logActivity(req, {
+    action: 'UPDATE', module: 'Master', recordId: row._id,
+    recordLabel: labelOfRow(def, row.toObject ? row.toObject() : row),
+    message: `${def.label} updated`, meta: { master: def.label, key: def.key },
+    changes: diffFields(before, values, Object.keys(values)),
+  });
   res.json(row);
 };
 
@@ -149,7 +171,14 @@ export const update = async (req, res) => {
 export const remove = async (req, res) => {
   const def = defOr404(req.params.key, res);
   if (!def) return;
-  await modelForMaster(def.key).findByIdAndDelete(req.params.id);
+  const row = await modelForMaster(def.key).findByIdAndDelete(req.params.id);
+  if (row) {
+    await logActivity(req, {
+      action: 'DELETE', module: 'Master', recordId: row._id,
+      recordLabel: labelOfRow(def, row.toObject ? row.toObject() : row),
+      message: `${def.label} deleted`, meta: { master: def.label, key: def.key },
+    });
+  }
   res.json({ message: 'Deleted' });
 };
 
@@ -160,5 +189,13 @@ export const bulkRemove = async (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ message: 'No records selected' });
   const result = await modelForMaster(def.key).deleteMany({ _id: { $in: ids } });
+  // Log the bulk delete once with a count (req #4) — only after it actually ran.
+  if (result.deletedCount) {
+    await logActivity(req, {
+      action: 'DELETE', module: 'Master',
+      message: `${result.deletedCount} ${def.label} record(s) deleted (bulk)`,
+      meta: { count: result.deletedCount, master: def.label, key: def.key },
+    });
+  }
   res.json({ message: 'Deleted', deleted: result.deletedCount || 0 });
 };

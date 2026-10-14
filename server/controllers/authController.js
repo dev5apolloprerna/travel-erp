@@ -4,6 +4,7 @@ import { scopeToOrg, ownsOrg } from '../middleware/auth.js';
 import { resolveOrgId } from '../utils/orgContext.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
 import Service from '../models/Service.js'; // Import Service model for populate
+import { logActivity } from '../utils/activityLog.js';
 
 const signToken = (user) =>
   jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
@@ -46,7 +47,16 @@ export const login = async (req, res) => {
   if (expectedRole && user.role !== expectedRole) {
     return res.status(403).json({ message: 'This login is not valid for this portal' });
   }
+  // req #1: record the login (no password/token stored). `user` is passed directly since protect
+  // middleware hasn't populated req.user on the login route.
+  await logActivity({ user }, { action: 'LOGIN', module: 'Auth', recordId: user._id, recordLabel: user.name, message: `${user.role} signed in` });
   res.json({ token: signToken(user), user: publicUser(user) });
+};
+
+// POST /api/auth/logout  (protected) — records the sign-out; the client clears its token.
+export const logout = async (req, res) => {
+  await logActivity(req, { action: 'LOGOUT', module: 'Auth', recordId: req.user?._id, recordLabel: req.user?.name, message: `${req.user?.role} signed out` });
+  res.json({ message: 'Signed out' });
 };
 
 export const me = async (req, res) => {
@@ -78,6 +88,7 @@ export const createEmployee = async (req, res) => {
   });
   await user.setPassword(password || 'password123');
   await user.save();
+  await logActivity(req, { action: 'CREATE', module: 'Employee', recordId: user._id, recordLabel: user.name, message: 'Employee created' });
   res.status(201).json({ user: publicUser(user) });
 };
 
@@ -99,6 +110,7 @@ export const updateEmployee = async (req, res) => {
   if (isActive !== undefined) user.isActive = isActive;
   if (password) await user.setPassword(password);
   await user.save();
+  await logActivity(req, { action: 'UPDATE', module: 'Employee', recordId: user._id, recordLabel: user.name, message: password ? 'Employee updated (password changed)' : 'Employee / permissions updated' });
   res.json({ user: publicUser(user) });
 };
 
@@ -106,6 +118,7 @@ export const deleteEmployee = async (req, res) => {
   const emp = await User.findById(req.params.id);
   if (!emp || !ownsOrg(emp, req)) return res.status(404).json({ message: 'Employee not found' });
   await emp.deleteOne();
+  await logActivity(req, { action: 'DELETE', module: 'Employee', recordId: emp._id, recordLabel: emp.name, message: 'Employee deleted' });
   res.json({ message: 'Employee deleted' });
 };
 
@@ -162,6 +175,7 @@ export const createCompanyOwner = async (req, res) => {
   });
   await user.setPassword(password || 'owner123');
   await user.save();
+  await logActivity(req, { action: 'CREATE', module: 'CompanyOwner', recordId: user._id, recordLabel: user.name, message: 'Company Owner created' });
   res.status(201).json({ user: publicUser(user) });
 };
 
@@ -176,6 +190,7 @@ export const updateCompanyOwner = async (req, res) => {
   if (isActive !== undefined) user.isActive = isActive;
   if (password) await user.setPassword(password);
   await user.save();
+  await logActivity(req, { action: 'UPDATE', module: 'CompanyOwner', recordId: user._id, recordLabel: user.name, message: 'Company Owner updated' });
   res.json({ user: publicUser(user) });
 };
 
@@ -183,6 +198,7 @@ export const deleteCompanyOwner = async (req, res) => {
   const owner = await User.findOne({ _id: req.params.id, role: ROLES.COMPANY_OWNER });
   if (!owner) return res.status(404).json({ message: 'Company Owner not found' });
   await owner.deleteOne();
+  await logActivity(req, { action: 'DELETE', module: 'CompanyOwner', recordId: owner._id, recordLabel: owner.name, message: 'Company Owner deleted' });
   res.json({ message: 'Company Owner deleted' });
 };
 
@@ -231,6 +247,11 @@ export const resetUserPassword = async (req, res) => {
 
   await user.setPassword(newPassword);
   await user.save();
+  // Audit the admin password reset (req #5) — never log the password itself.
+  await logActivity(req, {
+    action: 'PASSWORD_RESET', module: 'Auth', recordId: user._id, recordLabel: user.name,
+    message: `Password reset for ${user.role} ${user.name} by ${req.user?.name || 'admin'}`,
+  });
   res.json({ message: `Password reset for ${user.name}` });
 };
 

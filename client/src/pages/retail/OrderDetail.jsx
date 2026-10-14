@@ -34,9 +34,10 @@ export default function OrderDetail() {
   const release = async () => { await api.put(`/retail/orders/${order._id}/release`); load(); };
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <PageHeader eyebrow="Retail" title={`Order ${order.orderNo}`}
         actions={<div className="flex items-center gap-2">
+          {order.isPackage && <Badge status="PARTIAL">Package · {order.services?.length || 0} services</Badge>}
           {order.cancelled && <Badge status="UNPAID">Cancelled</Badge>}
           {order.invoiceCancelled && !order.cancelled && <Badge status="UNPAID">Invoice cancelled</Badge>}
           {order.onHold && !order.cancelled && <Badge status="PARTIAL">On hold</Badge>}

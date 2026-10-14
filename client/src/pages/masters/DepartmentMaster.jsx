@@ -37,7 +37,7 @@ export default function DepartmentMaster() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <PageHeader eyebrow="FIT Masters" title="Department Master" />
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
       {(canCreate || canEdit) && (

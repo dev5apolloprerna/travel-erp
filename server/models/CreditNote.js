@@ -9,7 +9,7 @@ const creditNoteSchema = new mongoose.Schema(
 
     creditNoteNo: { type: String, index: true },     // CN-000001
     // The order that carried the cancelled invoice.
-    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
     // Snapshot of the cancelled invoice for audit (so the credit note stands on its own even if
     // the order is later edited elsewhere).
     invoiceNo: { type: String, default: '' },
@@ -21,6 +21,9 @@ const creditNoteSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// One credit note per order — hard guard against duplicates even under concurrent cancels.
+creditNoteSchema.index({ orderId: 1 }, { unique: true });
 
 // Sequential CN-000001 numbering per organization.
 creditNoteSchema.statics.nextCreditNoteNo = async function (orgId) {

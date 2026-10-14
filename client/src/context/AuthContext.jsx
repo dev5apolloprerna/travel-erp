@@ -28,6 +28,8 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    // Record the sign-out (best effort) before the token is cleared. Never block logout on it.
+    api.post('/auth/logout').catch(() => {});
     sessionStorage.removeItem(IMP_KEY);
     setImpersonating(false);
     localStorage.removeItem('token');

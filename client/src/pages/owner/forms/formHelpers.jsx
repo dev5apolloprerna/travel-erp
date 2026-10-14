@@ -136,7 +136,7 @@ export function DetailGrid({ masterKey, parentId, parentField, title, columns, s
       </div>
 
       {open && (
-        <Modal title={`${editRow ? 'Edit' : 'Add'} ${title}`} onClose={() => setOpen(false)} maxWidth="max-w-3xl">
+        <Modal title={`${editRow ? 'Edit' : 'Add'} ${title}`} onClose={() => setOpen(false)} maxWidth="max-w-5xl">
           {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           <div className="grid gap-x-[18px] gap-y-4 sm:grid-cols-2">
             {modalFields.map((field) => (

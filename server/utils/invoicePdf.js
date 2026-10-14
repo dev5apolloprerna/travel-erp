@@ -8,7 +8,7 @@ const dt = (d) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
  * Build the invoice PDF and stream it into `stream` (an HTTP response or a buffer collector).
  * @param {object} opts { order, settings, party }  party = customer or company
  */
-export const buildInvoicePdf = ({ order, settings, party }, stream) => {
+export const buildInvoicePdf = ({ order, settings, party, docTitle = 'TAX INVOICE' }, stream) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   doc.pipe(stream);
 
@@ -32,7 +32,7 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
   doc.text(addr.join('\n'), 40, 68, { width: 300 });
 
   doc.fillColor(INK).fontSize(16).font('Helvetica-Bold')
-    .text('TAX INVOICE', 350, 45, { width: pageW - 310, align: 'right' });
+    .text(docTitle, 350, 45, { width: pageW - 310, align: 'right' });
   doc.fontSize(9).font('Helvetica').fillColor(MUTED)
     .text(`Invoice No: ${order.invoiceNo || '-'}`, 350, 70, { width: pageW - 310, align: 'right' })
     .text(`Invoice Date: ${dt(order.invoiceDate || order.createdAt)}`, { width: pageW - 310, align: 'right' })
@@ -92,6 +92,9 @@ export const buildInvoicePdf = ({ order, settings, party }, stream) => {
     // Generic line-item source (e.g. Supplier Invoices, req #5) — reuses this whole
     // template/format; only the row source differs from the service-charge path.
     chargeRows = order.pdfLines.map((l) => [l.description || 'Item', l.amount]);
+  } else if (order.isPackage && Array.isArray(order.invoicePackageLines)) {
+    // Package invoice: one row per included service (req #3).
+    chargeRows = order.invoicePackageLines.map((l) => [l.description || l.serviceType || 'Service', l.amount]);
   } else if (svc === 'HOTEL') {
     chargeRows = (order.invoiceRooms || []).map((r, i) => [
       `${r.roomType || 'Room'} (${Number(r.roomCount || r.rooms) || 0} × ${money(r.rate)}, ${Number(r.taxPercent) || 0}%)`,

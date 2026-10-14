@@ -4,6 +4,7 @@ import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { Tabs } from '../../../components/ui';
 import { FieldsGrid } from './formHelpers';
+import { useMasterBase } from '../useMasterBase';
 
 // Account Add/Edit — six tabs (requirement #3), in the exact order of the screenshots.
 // Reuses the existing `account` master definition and the /owner/masters/account API.
@@ -75,7 +76,8 @@ export default function AccountForm() {
   useEffect(() => { if (editing) api.get(`/owner/masters/account/${id}`).then((r) => setForm(r.data)); }, [id, editing]);
 
   const setField = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
-  const backToList = () => nav('/owner/account');
+  const base = useMasterBase();
+  const backToList = () => nav(`${base}/account`);
 
   // Any existing field not explicitly placed is shown under the Additional tab so nothing is dropped.
   const remainingKeys = useMemo(() => {

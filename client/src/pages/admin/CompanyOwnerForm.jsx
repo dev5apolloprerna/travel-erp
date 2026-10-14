@@ -40,7 +40,7 @@ export default function CompanyOwnerForm() {
       <PageHeader eyebrow="Administration" title={editing ? 'Edit Company Owner' : 'Add Company Owner'} />
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
-      <Card title="Company Owner Details" className="max-w-3xl">
+      <Card title="Company Owner Details" className="max-w-5xl">
         <div className="grid gap-x-[18px] gap-y-4 sm:grid-cols-2">
           <Field label={<>Full name <span className="text-red-500">*</span></>}>
             <Input value={form.name} onChange={(e) => set('name')(e.target.value)} />

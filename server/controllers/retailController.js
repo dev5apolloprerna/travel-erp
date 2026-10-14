@@ -9,6 +9,7 @@ import Settings from '../models/Settings.js';
 // GST no longer applied at order time — tax is entered at invoice generation
 import { publicUrl, removeFile } from '../utils/upload.js';
 import { sendCredentialsMail } from '../utils/mailer.js';
+import { logActivity, diffFields } from '../utils/activityLog.js';
 
 const genPassword = () => Math.random().toString(36).slice(-8);
 
@@ -28,8 +29,18 @@ export const getCustomer = async (req, res) => {
 };
 
 export const createCustomer = async (req, res) => {
-  const { name, mobile, email, city, state, stateCode, gstNumber, address } = req.body;
+  const { name, mobile, city, state, stateCode, gstNumber, address } = req.body;
+  // req #3: normalise the email (trim + lowercase) and reject a duplicate within the same org
+  // (customer uniqueness is per-tenant/org, matching the existing org-scoped data model).
+  const email = (req.body.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ message: 'Email is required.' });
   const orgId = await resolveOrgId(req);
+  const dupFilter = { email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') };
+  if (orgId) dupFilter.organizationId = orgId;
+  const existingCustomer = await Customer.findOne(dupFilter);
+  if (existingCustomer)
+    return res.status(400).json({ message: 'A customer with this email already exists.' });
+
   const customer = await Customer.create({
     name, mobile, email, city, state, stateCode, gstNumber, address, createdBy: req.user._id, organizationId: orgId,
   });
@@ -53,6 +64,8 @@ export const createCustomer = async (req, res) => {
   }
   await portalUser.setPassword(tempPass);
   await portalUser.save();
+
+  await logActivity(req, { action: 'CREATE', module: 'Customer', recordId: customer._id, recordLabel: customer.name, message: 'Customer created' });
 
   const loginUrl = `${process.env.CLIENT_URL}/login/retail`;
   // Try to actually email the credentials (falls back gracefully if SMTP isn't set up yet)
@@ -147,18 +160,44 @@ const buildOrderServices = async (services = [], selectedType) => {
   return { services: resolved, invoiceType };
 };
 
+// Validate a package booking server-side (req #3): it must contain at least two services, and
+// every line must reference a real, active service. Prices/totals are never taken from the client.
+const validatePackage = async (services = []) => {
+  if (!Array.isArray(services) || services.length < 2)
+    return 'A package must contain at least two services.';
+  for (const line of services) {
+    if (!line.serviceRef) return 'Every package service must be selected from the Service Master.';
+    const master = await Service.findById(line.serviceRef);
+    if (!master || master.isActive === false) return 'One of the selected services is invalid or inactive.';
+    // req #2: Flight is not allowed inside a package booking.
+    if ((master.name || '').toUpperCase() === 'FLIGHT') return 'Flight booking is not available within a package.';
+  }
+  return null;
+};
+
 export const createOrder = async (req, res) => {
-  const { customerId, services, invoiceType } = req.body;
+  const { customerId, services, invoiceType, isPackage } = req.body;
+  if (!customerId) return res.status(400).json({ message: 'Please select a customer.' });
+
+  if (isPackage) {
+    const err = await validatePackage(services);
+    if (err) return res.status(400).json({ message: err });
+  }
 
   const t = await buildOrderServices(services || [], invoiceType);
 
   const orgId = await resolveOrgId(req);
   const order = await Order.create({
     module: 'RETAIL', customerId,
+    isPackage: !!isPackage,
     services: t.services,
     invoiceType: t.invoiceType,
     createdBy: req.user._id,
     organizationId: orgId,
+  });
+  await logActivity(req, {
+    action: 'CREATE', module: 'Order', recordId: order._id, recordLabel: order.orderNo,
+    message: `${isPackage ? 'Package order' : 'Order'} created with ${order.services?.length || 0} service(s)`,
   });
   res.status(201).json(order);
 };
@@ -173,13 +212,20 @@ export const updateOrder = async (req, res) => {
     return res.status(400).json({ message: 'This order cannot be edited because its invoice has already been generated.' });
   if (order.cancelled)
     return res.status(400).json({ message: 'This order has been cancelled and can no longer be edited.' });
-  const { services, invoiceType } = req.body;
+  const { services, invoiceType, isPackage } = req.body;
+  const wantPackage = isPackage === undefined ? order.isPackage : !!isPackage;
+  if (services && wantPackage) {
+    const err = await validatePackage(services);
+    if (err) return res.status(400).json({ message: err });
+  }
   if (services) {
     const t = await buildOrderServices(services, invoiceType || order.invoiceType);
     order.services = t.services;
     order.invoiceType = t.invoiceType;
   }
+  if (isPackage !== undefined) order.isPackage = !!isPackage;
   await order.save(); // pre-save recomputes status
+  await logActivity(req, { action: 'UPDATE', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order updated' });
   res.json(order);
 };
 
@@ -198,6 +244,7 @@ export const holdOrder = async (req, res) => {
   order.heldAt = new Date();
   order.holdReason = (req.body?.reason || '').toString().trim();
   await order.save();
+  await logActivity(req, { action: 'HOLD', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order put on hold', meta: { reason: order.holdReason } });
   res.json(order);
 };
 
@@ -211,6 +258,7 @@ export const releaseOrder = async (req, res) => {
   order.heldAt = null;
   order.holdReason = '';
   await order.save();
+  await logActivity(req, { action: 'RELEASE', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order released from hold' });
   res.json(order);
 };
 
@@ -227,6 +275,7 @@ export const cancelOrder = async (req, res) => {
   order.cancelledAt = new Date();
   order.cancelReason = (req.body?.reason || '').toString().trim();
   await order.save();
+  await logActivity(req, { action: 'CANCEL', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order cancelled', meta: { reason: order.cancelReason } });
   res.json(order);
 };
 
@@ -242,6 +291,7 @@ export const addPayment = async (req, res) => {
   });
   order.paidAmount = (order.paidAmount || 0) + Number(amount);
   await order.save();
+  await logActivity(req, { action: 'PAYMENT', module: 'Payment', recordId: payment._id, recordLabel: order.orderNo, message: `Payment recorded: ${amount}` });
   res.status(201).json({ payment, order });
 };
 
@@ -250,6 +300,7 @@ export const deleteCustomer = async (req, res) => {
   const existing = await Customer.findById(req.params.id);
   if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Customer not found' });
   await Customer.findByIdAndDelete(req.params.id);
+  await logActivity(req, { action: 'DELETE', module: 'Customer', recordId: existing._id, recordLabel: existing.name, message: 'Customer deleted' });
   res.json({ message: 'Customer deleted' });
 };
 export const updateCustomer = async (req, res) => {
@@ -257,7 +308,9 @@ export const updateCustomer = async (req, res) => {
   if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Customer not found' });
   // organizationId is tenant-owned — never let it be reassigned via the payload
   const { organizationId, ...patch } = req.body;
+  const changes = diffFields(existing, patch, ['name', 'email', 'mobile', 'city', 'state', 'gstNumber', 'address']);
   const customer = await Customer.findByIdAndUpdate(req.params.id, patch, { new: true });
+  await logActivity(req, { action: 'UPDATE', module: 'Customer', recordId: customer._id, recordLabel: customer.name, message: 'Customer updated', changes });
   res.json(customer);
 };
 export const deleteOrder = async (req, res) => {
@@ -272,5 +325,6 @@ export const deleteOrder = async (req, res) => {
     return res.status(400).json({ message: 'A cancelled order cannot be deleted (kept for audit/reporting).' });
   await Order.findByIdAndDelete(req.params.id);
   await Payment.deleteMany({ orderId: req.params.id });
+  await logActivity(req, { action: 'DELETE', module: 'Order', recordId: existing._id, recordLabel: existing.orderNo, message: 'Order deleted' });
   res.json({ message: 'Order deleted' });
 };

@@ -10,6 +10,7 @@ import { publicUrl, removeFile } from '../utils/upload.js';
 import { sendCredentialsMail } from '../utils/mailer.js';
 import { scopeToOrg, ownsOrg } from '../middleware/auth.js';
 import { resolveOrgId } from '../utils/orgContext.js';
+import { logActivity } from '../utils/activityLog.js';
 
 const genPassword = () => Math.random().toString(36).slice(-8);
 
@@ -52,6 +53,7 @@ export const createCompany = async (req, res) => {
   const company = await Company.create({
     ...body, createdBy: req.user._id, organizationId: await resolveOrgId(req),
   });
+  await logActivity(req, { action: 'CREATE', module: 'Company', recordId: company._id, recordLabel: company.name, message: 'B2B company created' });
   res.status(201).json(company);
 };
 
@@ -173,6 +175,7 @@ export const createOrder = async (req, res) => {
     createdBy: req.user._id,
     organizationId: company.organizationId || await resolveOrgId(req),
   });
+  await logActivity(req, { action: 'CREATE', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'B2B order created' });
   res.status(201).json(order);
 };
 
@@ -240,6 +243,7 @@ export const addLumpSumPayment = async (req, res) => {
   company.totalPaid = (company.totalPaid || 0) + total;
   await company.save();
 
+  await logActivity(req, { action: 'PAYMENT', module: 'Payment', recordId: payment._id, recordLabel: company.name, message: `B2B payment received: ${total}` });
   res.status(201).json({ payment, company, unallocated: Math.round((total - allocated) * 100) / 100 });
 };
 
@@ -268,6 +272,7 @@ export const updateCompany = async (req, res) => {
   // organizationId is tenant-owned — never let it be reassigned via the payload.
   const { organizationId, ...patch } = req.body;
   const company = await Company.findByIdAndUpdate(req.params.id, patch, { new: true });
+  await logActivity(req, { action: 'UPDATE', module: 'Company', recordId: company._id, recordLabel: company.name, message: 'B2B company updated' });
   res.json(company);
 };
 export const deleteCompany = async (req, res) => {
@@ -275,6 +280,7 @@ export const deleteCompany = async (req, res) => {
   if (!existing) return res.status(404).json({ message: 'Company not found' });
   await Company.findByIdAndDelete(req.params.id);
   await User.deleteMany({ companyId: req.params.id, role: ROLES.B2B_MEMBER });
+  await logActivity(req, { action: 'DELETE', module: 'Company', recordId: existing._id, recordLabel: existing.name, message: 'B2B company deleted' });
   res.json({ message: 'Company deleted' });
 };
 export const deleteMember = async (req, res) => {

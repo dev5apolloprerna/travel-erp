@@ -19,6 +19,8 @@ import publicRoutes from './routes/publicRoutes.js';
 import ownerRoutes from './routes/ownerRoutes.js';
 import organizationRoutes from './routes/organizationRoutes.js';
 import supplierInvoiceRoutes from './routes/supplierInvoiceRoutes.js';
+import activityLogRoutes from './routes/activityLogRoutes.js';
+import websiteCustomerRoutes from './routes/websiteCustomerRoutes.js';
 import { stripeWebhook, razorpayWebhook } from './controllers/websiteBookingController.js';
 
 // Load environment variables
@@ -126,6 +128,10 @@ app.use('/api/org', organizationRoutes);
 console.log('  ✓ /api/org (organizations / main companies)');
 app.use('/api/supplier-invoices', supplierInvoiceRoutes);
 console.log('  ✓ /api/supplier-invoices (Main Company -> 360 invoices)');
+app.use('/api/activity-logs', activityLogRoutes);
+console.log('  ✓ /api/activity-logs (activity/audit log)');
+app.use('/api/public/customer', websiteCustomerRoutes);
+console.log('  ✓ /api/public/customer (website customer auth)');
 console.log('  ✓ /api/owner (company owner masters)');
 
 // Error handling

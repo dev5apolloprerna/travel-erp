@@ -94,7 +94,7 @@ export default function CustomerForm() {
   if (!editing) return <div className="max-w-2xl"><PageHeader eyebrow="Retail" title="New customer" />{detailsCard}</div>;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-5xl">
       <PageHeader eyebrow="Retail" title={`Edit customer — ${form.name}`} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'details', label: 'Details' },

@@ -2,6 +2,7 @@ import SupplierInvoice from '../models/SupplierInvoice.js';
 import Organization, { ORG_TYPES } from '../models/Organization.js';
 import Settings from '../models/Settings.js';
 import { buildInvoicePdf } from '../utils/invoicePdf.js';
+import { logActivity } from '../utils/activityLog.js';
 
 const num = (v) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 const round2 = (v) => Math.round(num(v) * 100) / 100;
@@ -59,6 +60,7 @@ export const create = async (req, res) => {
     createdBy: req.user?._id,
     ...t,
   });
+  await logActivity(req, { action: 'CREATE', module: 'SupplierInvoice', recordId: doc._id, recordLabel: doc.invoiceNo, message: 'Supplier invoice created' });
   res.status(201).json(doc);
 };
 
@@ -73,6 +75,7 @@ export const update = async (req, res) => {
   if (req.body.notes !== undefined) row.notes = req.body.notes;
   Object.assign(row, t);
   await row.save();
+  await logActivity(req, { action: 'UPDATE', module: 'SupplierInvoice', recordId: row._id, recordLabel: row.invoiceNo, message: 'Supplier invoice updated' });
   res.json(row);
 };
 
@@ -124,5 +127,6 @@ export const remove = async (req, res) => {
   const row = await SupplierInvoice.findOne({ _id: req.params.id, organizationId: orgId });
   if (!row) return res.status(404).json({ message: 'Supplier invoice not found' });
   await row.deleteOne();
+  await logActivity(req, { action: 'DELETE', module: 'SupplierInvoice', recordId: row._id, recordLabel: row.invoiceNo, message: 'Supplier invoice deleted' });
   res.json({ message: 'Supplier invoice deleted' });
 };

@@ -1410,3 +1410,610 @@ changes.
 **Assumption:** B2B order actions use the existing `retail-orders` ("Orders") permission because the
 application has no separate B2B-orders menu/permission key; this matches the report that removing the
 single Order permission must hide Book/Order on both listings.
+
+---
+
+## v36 — Credit note on employee cancel, invoice role permissions, multi-service package booking
+
+### 1. Credit note is generated when a Company Employee cancels an invoice
+**Root cause.** The cancel endpoint (`POST /api/invoices/:orderId/cancel`, v33) was guarded by
+`allow(SUPER_ADMIN)` only. So when a company employee tried to cancel an invoice they raised, the
+request was rejected 403 and the `cancelInvoice` controller — which creates the credit note — never
+ran. The credit-note code was fine; the authorization blocked employees from reaching it.
+**Fix.**
+- Route now `allow(SUPER_ADMIN, EMPLOYEE)` — Super Admin and Employees can cancel; Company Owner is
+  intentionally excluded (req #2). Enforced server-side, so a direct request from a CO is rejected.
+- `cancelInvoice` hardened: idempotent (a repeat cancel returns the existing credit note instead of a
+  new one — no duplicates), the credit note is persisted **before** the invoice is flagged cancelled
+  (so a failure can't leave a cancelled invoice without a credit note), failures return a 500 and do
+  **not** mark the invoice cancelled, and a duplicate-key race is caught and reconciled.
+- Added a **unique index on `CreditNote.orderId`** as the final duplicate guard.
+- The credit note carries invoice no/date, amount (invoice net), order ref, reason and creator — all
+  via the existing relationships. Works regardless of which role created the original invoice.
+
+### 2. Invoice edit/cancel/delete permissions by role
+- **Company Owner:** view ✓, edit (regenerate) ✓, cancel ✗, delete ✗.
+- **Super Admin:** view ✓, edit ✓, cancel ✓, delete ✓ (subject to the existing rule that an
+  invoiced/cancelled order can't be deleted — v33).
+- **Employee:** unchanged except they can now cancel (required by #1).
+- Frontend: the "Cancel invoice & raise credit note" button on the invoice screen shows for Super
+  Admin and Employees, hidden for Company Owners; the Edit/Regenerate action stays available to CO.
+- Backend: the route guard above is the enforcement; order delete already excludes CO (matrix DELETE,
+  v34) and blocks invoiced/cancelled orders (v33). No bypass via direct API/URL.
+
+### 3. Multi-service package booking (one order, many services)
+`Order.services[]` already holds multiple heterogeneous service lines and `Order.isPackage` existed
+but was unused; invoicing assumed a single service type. Added, on the retail booking path:
+- **Booking:** `retail/BookingFlow.jsx` gains a *Single service* / *Package* mode toggle. In package
+  mode the user adds ≥2 services (each with its own booking-detail form + passengers) and saves **one**
+  order with `isPackage: true` and all services in `services[]`. Single-service booking is unchanged.
+- **Validation (backend):** `retailController` validates a package has ≥2 lines and every line
+  references a real, active Service; prices/totals are never taken from the client.
+- **Invoicing:** `invoiceController.generateInvoiceNo` branches for packages — the operator enters one
+  amount per included service, gross = their sum (recomputed server-side), then the usual footer
+  (Discount/TDS/TCS/Govt Tax/Service Charge) applies; a package gets its own `PKG-######` number.
+  The breakdown is stored in `Order.invoicePackageLines` and rendered on the PDF (reusing the invoice
+  template). `getForInvoice` exposes `isPackage` + the included services for the screen.
+- **UI:** `InvoiceGenerate.jsx` shows a "Package services" amount grid for package orders;
+  `OrderDetail.jsx` shows a "Package · N services" badge and already lists every service's details.
+
+**Database (additive, no migration):** `Order.invoicePackageLines` (new optional field);
+`CreditNote.orderId` unique index. No data touched.
+
+**New/changed routes:** `POST /api/invoices/:orderId/cancel` now `allow(SUPER_ADMIN, EMPLOYEE)`.
+
+**Verified:** `vite build` OK (164 modules); `node --check` + import OK on all changed server files
+(duplicate-index warning resolved). `owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` /
+`server/package.json` untouched.
+
+**Assumptions / limitations:** Package booking is implemented on the **retail** flow (the primary
+booking path); B2B and FIT remain single-service and can be extended with the same pattern. Package
+pricing follows the app's existing "manual at invoice generation" model (one amount per service),
+since no pre-defined package price list exists for internal ERP services (the CMS `TourPackage` is a
+separate website concept and was left untouched). Live DB transactions require a replica set, which
+isn't available in this sandbox; the cancel flow instead uses persist-credit-note-first ordering plus
+the unique index and idempotency checks to guarantee a consistent state.
+
+---
+
+## v37 — Invoice Cancel/Delete = Superadmin only; Credit Note verification, listing & download
+
+### 1. Invoice actions by role (Edit/Hold for CO + Employee; Cancel/Delete Superadmin-only)
+This refines v36. The rule is now: **Company Owner and Company Employee may Edit and Hold invoices/
+orders, but may NOT Cancel or Delete; only Superadmin can Cancel and Delete.**
+- `routes/invoiceRoutes.js`: `POST /:orderId/cancel` reverted to `allow(SUPER_ADMIN)` (v36 had also
+  allowed EMPLOYEE — removed). A direct API/URL cancel by a CO or Employee is rejected 403.
+- `InvoiceGenerate.jsx`: the "Cancel invoice & raise credit note" button shows only for Superadmin;
+  the Edit/Regenerate action stays available to CO and Employee.
+- **Hold** (order hold, v33) and **Edit** remain gated by `can('retail-orders','EDIT')`, which both CO
+  and (permitted) Employees have — unchanged. **Delete** of an invoiced order is already blocked for
+  everyone (v33) and for CO by the matrix (v34); Superadmin delete remains subject to that rule.
+- Credit note still generates correctly when a **Superadmin** cancels an invoice that was created by
+  an employee (the generator never depended on the creator's role — only the cancel authorization did).
+
+### 2. Credit Note generation — verified, listed, linked and downloadable
+**Investigation result: credit notes are BOTH generated AND were accessible; this release makes them
+easier to find and adds a downloadable document.**
+- **Generated:** `invoiceController.cancelInvoice` (v33) creates a `CreditNote` (CN-######) inside the
+  cancel flow — credit-note-first, idempotent, unique index on `orderId` (no duplicates), amount =
+  invoice net, linked to the order and stamped on the order as `creditNoteId` / `creditNoteNo`.
+  This was confirmed by tracing the workflow; generation was **not** failing.
+- **Navigation path:** **Administration → Credit Notes** (`/app/invoices/credit-notes`), the listing
+  page added in v33. This release enriches it to show Credit Note no, original Invoice no,
+  **Customer/Company**, Order no, Amount, **Status (Issued)** and Date.
+- **Download:** new `GET /api/invoices/credit-notes/:id/pdf` renders the credit note document
+  (reuses the invoice PDF template with a "CREDIT NOTE" title, numbered with the CN number and a note
+  referencing the original invoice). A **Download** button is on each listing row.
+- **Invoice → Credit Note link:** on a cancelled invoice the screen now shows a "Download credit note"
+  button next to the cancelled banner (which already names the CN number).
+- No duplicates / no regeneration of valid records: the idempotency check + unique index are kept; no
+  backfilling is performed.
+
+### Files changed
+- server: `routes/invoiceRoutes.js` (cancel guard; CN pdf route), `controllers/invoiceController.js`
+  (enriched `listCreditNotes`; new `downloadCreditNote`), `utils/invoicePdf.js` (`docTitle` option).
+- client: `pages/invoice/InvoiceGenerate.jsx` (cancel SA-only; download-credit-note link),
+  `pages/invoice/CreditNotes.jsx` (party/status columns + download).
+
+**Database:** no schema/migration changes; no data touched. **API:** additive only (one new GET
+route; `listCreditNotes` rows gain a convenience `party` field — existing fields unchanged).
+
+**Verified:** `vite build` OK (164 modules); `node --check` + import OK; routes include
+`GET /credit-notes/:id/pdf` and `POST /:orderId/cancel` (SA-only). `owner/OwnerLayout.jsx` /
+`owner/MasterForm.jsx` / `server/package.json` untouched.
+
+### What existed / fixed / new
+- **Existed:** credit-note generation on Superadmin cancel; the Credit Notes listing + menu (v33).
+- **Fixed:** cancel permission tightened to Superadmin-only (CO & Employee can no longer cancel,
+  front- and back-end).
+- **New:** credit note customer/company + status in the listing, a downloadable Credit Note PDF, and
+  a download link from the cancelled invoice to its credit note.
+
+### Limitations / assumptions
+- `CreditNote` has no explicit status column, so Status shows "Issued" (a credit note existing means
+  it was issued); amounts/relationships use the existing schema. DB transactions need a replica set
+  (not available here), so consistency relies on persist-CN-first + unique index + idempotency.
+
+---
+
+## v38 — Activity logs, package flight removal, customer-email uniqueness, order-action permissions, 4-section dashboard
+
+### 1. Activity logs (new)
+- New `models/ActivityLog.js` + `utils/activityLog.js` (`logActivity`, `diffFields`). Logging is
+  fire-and-forget and fully guarded in try/catch, so a logging failure never breaks the main
+  operation; it is called only AFTER an operation succeeds (one row per real event, no duplicates).
+  Sensitive keys (password/token/secret/…) are stripped before writing.
+- Instrumented backend operations: Order create/update/delete/cancel/hold/release, Customer
+  create/update(with field-level old→new diff)/delete, Invoice generate, Invoice cancel.
+- `GET /api/activity-logs` (controller + route, org-scoped, newest first, module/action filters).
+  Viewer at **Master → Administration → Activity Logs** (`/app/activity-logs`) showing when, who,
+  role, action, module, record and details (with the change diff for updates).
+
+### 2. Flight removed from Package Booking
+- `retail/BookingFlow.jsx`: the package service picker now excludes Flight (`packageBookable`).
+- `retailController.validatePackage`: rejects a package line whose service is Flight (backend guard).
+- Standalone / single-service flight booking is unchanged.
+
+### 3. Duplicate customer email prevented
+- `retailController.createCustomer`: email is normalised (trim + lowercase) and checked
+  case-insensitively, **scoped to the organisation** (matching the app's per-tenant customer model).
+  A duplicate returns 400 "A customer with this email already exists." The existing customer forms
+  already surface server errors (CustomerForm, NewCustomerModal). No existing data touched; no unique
+  DB index added because existing data may legitimately contain historical duplicates.
+
+### 4. Employee Order permissions (Delete showing despite no permission)
+**Root cause:** the retail Order listing rendered View/Edit/Hold/Cancel/Delete unconditionally — it
+never consulted the permission matrix (the backend routes were already guarded in v33). Fix:
+`retail/OrderList.jsx` now gates every action via `can('retail-orders', …)` — New order=CREATE,
+View=READ/SELECT, Edit/Hold/Release/Cancel=EDIT, Delete=DELETE. An employee with only
+Select/Create/Read no longer sees Edit or Delete, and the backend already rejects unauthorised
+direct requests.
+
+### 5. Four-section dashboard navigation
+- Landing page (`EmployeeDashboard.jsx`) now shows four cards — **Website, Booking, Account,
+  Master** — and only the sections the user is authorised for.
+- `menuConfig.js`: every group tagged with an `area`; added `AREAS`, `availableAreas(user)` and
+  `areaForPath()`. Mapping: Website = CMS menus; Booking = Retail / B2B / Society orders & bookings;
+  Account = Supplier Invoices, Credit Notes, Company Profile + personal (My Profile, Change Password);
+  Master = Service Master, Team/Employees, Main Companies, Company Owners, Activity Logs, Society
+  Masters, HR.
+- `Sidebar.jsx`: a four-button section switcher shows only accessible areas and renders only the
+  active area's groups (Home always shown); the active section follows the current page. Permissions
+  are respected (unchanged `visibleMenu`), and backend authorization still blocks direct URLs.
+
+### Files
+- server (new): `models/ActivityLog.js`, `utils/activityLog.js`, `controllers/activityLogController.js`,
+  `routes/activityLogRoutes.js`. server (changed): `server.js` (mount), `controllers/retailController.js`
+  (email check, flight-in-package guard, activity logs), `controllers/invoiceController.js` (activity logs).
+- client (new): `pages/admin/ActivityLogs.jsx`. client (changed): `menuConfig.js`,
+  `components/layout/Sidebar.jsx`, `pages/EmployeeDashboard.jsx`, `pages/retail/OrderList.jsx`,
+  `pages/retail/BookingFlow.jsx`, `App.jsx`.
+
+### Database / API
+- New `activitylogs` collection (created on first log). No migration; no existing data changed.
+  API additions are additive (one new GET route).
+
+### Verified
+- `vite build` OK (165 modules); `node --check` + import OK on all changed/new server files; the
+  `/api/activity-logs` route is mounted. `owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` /
+  `server/package.json` untouched.
+
+### Root causes / assumptions / limitations
+- #4 root cause: UI didn't check the matrix (backend already did). Fixed on the retail Order listing
+  (the reported screen); the same `can()` pattern already covers other listings from v34/v35.
+- #5: the four-section landing is implemented for the **/app** staff shell (Superadmin + Employee).
+  Company Owners run in the separate, protected `/owner` shell (OwnerLayout is off-limits in this
+  engagement), so their navigation is unchanged; the same area mapping can be applied there if that
+  file is unlocked. Per-type invoice *creation* stays inline on the order screens (Booking) per the
+  existing workflow; Account holds the invoice/accounting management screens.
+- #1: activity logging covers the retail order/customer and invoice flows (the "important
+  activities" named in the spec); the reusable `logActivity` helper can be dropped into B2B/FIT/CMS
+  controllers identically. No DB transaction is used for the log itself by design (it must never
+  affect or roll back the main operation).
+- #3: uniqueness is enforced at the application layer scoped to the org; a DB unique index was
+  deliberately not added so pre-existing duplicates are preserved (per "do not delete/merge data").
+
+---
+
+## v39 — Website masters, public APIs & website-customer accounts
+
+Built on v38. Every new table uses MongoDB's `_id` as its unique primary key; email fields that must
+be unique also carry a unique index. Seeders are non-destructive (sample rows only when empty).
+
+### New database tables (models + seed)
+- `banners` (Banner) — title, bannerImage, created_date, timestamps.
+- `videogalleries` (VideoGallery) — title, description, video_url_link, timestamps.
+- `ourteem_website` (OurTeam) — name, designation, photo, department, flag (dropdown: first | second).
+- `travelinspirations` (TravelInspiration) — email (**unique**).
+- `customizetrips` (CustomizeTrip) — like_to_tavel, PreferredDestination, number_of_days,
+  Travellerscount, Preferred_Travel_Date, Trip_Type, Hotel_Preference, budget_of_planing, Budget_Type,
+  name, phone, email, Special_Requirements, package_id — all default null; create_at / update_at.
+- `wishlists` (Wishlist) — websitecustomer_id, package_id (unique pair).
+- `websitecustomers` (WebsiteCustomer) — name, mobile, email (**unique**), passwordHash, reset fields.
+
+### Super Admin — Website menu (new submenus, full CRUD, permission-gated)
+- **Banner Master** (`/app/cms/banners`), **Video Gallery** (`/app/cms/videos`), **Our Team**
+  (`/app/cms/team`) — list / create / edit / delete, gated by the permission matrix
+  (`cms-banners`, `cms-videos`, `cms-team`).
+- **Travel Inspiration** (`/app/cms/travel-inspiration`) — listing with email search + **Export to
+  Excel** (CSV).
+- **Customize Trip** (`/app/cms/customize-trip`) — listing with package + date filters, an eye-icon
+  **detail** view, and **Export to Excel** (CSV).
+- Admin routes: `GET/POST/PUT/DELETE /api/cms/{banners,videos,team}`, `GET /api/cms/travel-inspirations`,
+  `GET /api/cms/customize-trips`, `GET /api/cms/customize-trips/:id`.
+
+### Public APIs (Node.js only — no React storefront)
+- `POST /api/public/travel-inspiration` — stores an email; a repeat email is not duplicated (unique).
+- `POST /api/public/customize-trip` — stores a customise-trip request (all fields optional/null).
+- `GET  /api/public/our-team` — lists team members (with absolute photo_url).
+- `POST /api/public/wishlist` — body `{ websitecustomer_id, package_id }`; no duplicate pair.
+- `GET  /api/public/destination_categories` — **updated only** to also return `image_url` (absolute);
+  all other existing public APIs are unchanged.
+
+### Website-customer accounts (Node.js only) — mounted at `/api/public/customer`
+- `POST /register` (name, mobile, email, password, conform_passwrd) → creates the account and sends a
+  welcome email; if SMTP isn't configured the signup still succeeds (mail errors are swallowed).
+- `POST /login` (email + password) → returns a website-customer JWT.
+- `POST /forgot-password` → if the email exists, stores a 1-hour reset token and emails it (generic
+  response either way).
+- `POST /reset-password` (token, password, conform_passwrd).
+- `GET  /profile` (auth), `POST /change-password` (auth).
+- `GET  /wishlist` (auth) → the logged-in customer's wishlist with package details.
+- Auth is a separate JWT (`kind: websitecustomer`) verified by `middleware/websiteAuth.js`; it never
+  mixes with the ERP `User`/`Customer` auth.
+
+### Files
+- server (new): models `Banner, VideoGallery, OurTeam, TravelInspiration, CustomizeTrip, Wishlist,
+  WebsiteCustomer`; `middleware/websiteAuth.js`; controllers `websiteCustomerController.js`,
+  `websiteMasterController.js`; routes `websiteCustomerRoutes.js`.
+- server (changed): `controllers/publicController.js` (store endpoints + image_url), `routes/publicRoutes.js`,
+  `routes/cmsRoutes.js`, `server.js` (mounts), `utils/seed.js` (non-destructive seed).
+- client (new): `pages/cms/{BannerMaster,VideoGalleryMaster,OurTeamMaster,TravelInspirationList,
+  CustomizeTripList}.jsx`, `utils/exportCsv.js`.
+- client (changed): `App.jsx` (routes), `menuConfig.js` (Website submenus).
+
+### Verified
+- `vite build` OK (171 modules); `node --check` + ESM import OK on all new/changed server files;
+  route introspection confirms the new public, website-customer and CMS endpoints.
+- `owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` / `server/package.json` untouched. No existing
+  user-facing code or other APIs changed.
+
+### Notes / assumptions
+- The website storefront itself is **not** built in React (per the request) — only the Node public
+  APIs for it. The Super Admin master screens are React (they belong to the existing /app admin).
+- Seed adds a sample website customer: `webuser@example.com / webuser123`.
+- Run `npm run seed` once to create the new collections with sample rows (safe to re-run; existing
+  data is never cleared).
+
+---
+
+## v40 — Complete activity logging, header section selector, Company-Owner Master menus
+
+### 1. Activity logs now cover all modules (root cause fixed)
+**Root cause:** v38 added the `logActivity` helper but only wired it into the retail order/customer
+and invoice controllers, so Create/Edit/Delete in every other module were never logged. Fix: the
+`logActivity` call (log-after-success, guarded, no secrets, keeps a snapshot label/id so the entry
+survives record deletion) is now invoked from every relevant controller:
+- **Retail:** order create/update/delete/cancel/hold/release, customer create/update(diff)/delete, payment.
+- **B2B:** company create/update/delete, order create, lump-sum payment.
+- **Society (FIT):** cluster/division/grade/department (shared CRUD factory), passenger (DR),
+  society member, society order create/delete.
+- **Invoices:** generate, cancel (+ credit note).
+- **Supplier invoices:** create/update/delete.
+- **Service master:** create/update/delete.
+- **Employees & permissions:** employee create/update/delete; Company Owner create/update/delete.
+- **HR:** holiday create/update/delete; leave apply / approve / reject / cancel; salary slip upload/delete.
+- **Main companies:** create/update/delete.
+- **CMS / masters:** destination category, destination, tour package, FAQ, testimonial create/update/delete.
+- **Website masters (v39):** banner, video, our-team already logged.
+Failed operations never log (the call is after the successful write), and each business event logs
+once. The Activity Logs screen (Master → Administration → Activity Logs) now filters by all these
+modules and the APPROVE/REJECT/PAYMENT/HOLD/CANCEL actions.
+
+### 2/3. Header section selector (replaces the four sidebar buttons)
+- The four prominent in-sidebar section buttons (v38) are **removed**. A compact section selector now
+  lives in the top header: a segmented control on desktop, a dropdown on mobile, with a clear active
+  state and keyboard focus ring. Active section is shared via a small `AreaContext`, stays in sync
+  with the current page, and switching it filters the sidebar to that section's menus without a full
+  reload. The landing page's four cards still work and now drive the same shared state.
+- Files: new `context/AreaContext.jsx`; `components/layout/{AppLayout,Topbar,Sidebar}.jsx`,
+  `pages/EmployeeDashboard.jsx`.
+
+### 2D/4. Company Owner sees Master menus
+- **Root cause:** the Company-Owner allow-list in `menuConfig` didn't include any Master-area data
+  menu, so the Master section was sparse for that role. Fix: `admin-services` (Service Master) is
+  added to the Company-Owner visibility list, so Master now shows Team/Employees + Service Master for
+  a Company Owner. Visibility is separated from action authorization — the backend still enforces who
+  may create/edit/delete (a visible menu grants no new CRUD). The 360-level org-admin menus (Company
+  Owners, Main Companies, Supplier Invoices, Credit Notes, Activity Logs) and the Society/FIT module
+  remain excluded for Company Owners by the existing business rules.
+
+### Files changed
+- server: `controllers/{service,organization,supplierInvoice,auth,hr,b2b,cms,fit,retail}Controller.js`
+  (activity logging).
+- client: `context/AreaContext.jsx` (new); `components/layout/AppLayout.jsx`, `Topbar.jsx`, `Sidebar.jsx`;
+  `pages/EmployeeDashboard.jsx`; `pages/admin/ActivityLogs.jsx` (filters); `menuConfig.js` (CO visibility).
+
+### Database / API
+- No schema/migration changes. `activitylogs` (v38) is reused. API response structures unchanged.
+
+### Verified
+- `vite build` OK; `node --check` + ESM import OK on every changed controller. `owner/OwnerLayout.jsx`
+  / `owner/MasterForm.jsx` / `server/package.json` untouched.
+
+### Notes / limitations
+- The four-section nav applies to the `/app` staff shell (Superadmin + Employee). Company Owners run
+  in the separate, protected `/owner` shell (OwnerLayout is off-limits in this engagement); the same
+  header-selector pattern can be applied there if that file is unlocked.
+- View/Read audit logging is intentionally not emitted for ordinary list/detail GETs (would be noisy);
+  the helper supports a READ action if specific screens need it later.
+- A couple of low-traffic endpoints (e.g. the separate passenger-master controller, website-booking
+  admin edits) are not yet instrumented; the same one-line `logActivity` call extends to them identically.
+
+---
+
+## v41 — Activity-log breadth, invoice fix, Account dropdowns, banner/team images, public banner API
+
+### 1. Login / logout in the activity log
+- `authController.login` now records a `LOGIN` entry (no password/token stored); a new
+  `POST /api/auth/logout` records `LOGOUT` and the client calls it on sign-out (best effort). The
+  Activity Logs screen gained an `Auth` module filter and LOGIN/LOGOUT styling. (v40 already covers
+  create/edit/delete/hold/cancel/approve/reject/payment across all modules.)
+
+### 2. Super Admin can reach all Company-Owner master modules
+- **Root cause:** the `/owner` master-engine area already allows `SUPER_ADMIN` (route + backend), but
+  Super Admin's menu never linked to it. Fix: a single **Company Master Data** item under Master →
+  Administration opens the full Company master catalog (all ~80 engine masters, grouped). No menu
+  hardcoding, no duplicate routes; action authorization is unchanged (visibility ≠ CRUD).
+
+### 3. Customer invoice now saves correctly; PDF shows the real amount (was 0)
+- **Root cause:** `ensureInvoiceNo()` returned **before saving** whenever the order already had an
+  invoice number (a regenerate, or after a preview/download pre-assigned the number). The freshly
+  computed charge heads and totals were therefore never persisted, so the stored amount — and the
+  PDF — stayed 0, even though an activity-log row appeared. Fix: `ensureInvoiceNo` now only
+  *generates* the number when missing and **always persists** the order, so charges/subtotal/tax/
+  net are saved and the PDF reads the persisted amount. Logging still runs only after the successful
+  save; regenerating reuses the same number (no duplicate invoice).
+
+### 4. PNR on the Airline (Flight) service
+- The Flight form shows a PNR / Purchase-Order field (in addition to the existing Airline/CRS PNRs),
+  saved and redisplayed with the rest of the booking detail.
+
+### 5/6/7. Airline, Bus & Hotel dropdowns from the Account tab
+- **Root cause / source:** the "Account tab" is the `account` master (`tblAccountMaster`,
+  `strAccountName`). Fix: `account` is whitelisted in the staff dropdown-options API (active records
+  only), and the Flight **Airline**, Bus **Bus** and Hotel **Hotel Name** fields are now dynamic
+  dropdowns sourced from it (reusing the existing `mname` dropdown component + search). The selected
+  value is saved on the booking and redisplayed on edit/view; no duplicate master table, no hardcoded
+  options. The backend validates against the whitelisted master.
+
+### 8. Banner Master listing
+- **Root cause:** the listing rendered the stored relative path (`/uploads/...`) directly, which the
+  admin origin can't resolve. Fix: the thumbnail now uses the backend-absolute URL (same helper as
+  the edit form), with a graceful fallback for missing images. The **Created** and **Updated**
+  columns were removed from the listing (the `created_at`/`updated_at` DB fields are untouched).
+
+### 9. Public Banner API
+- `GET /api/public/banners` (no auth) returns `{ id, title, image_url }` with absolute image URLs,
+  newest first; no internal/admin fields exposed. Example:
+  `[ { "id": "...", "title": "Summer Escapes", "image_url": "https://host/uploads/cms/x.jpg" } ]`
+
+### 10. Our Team Master listing images
+- Same relative-path root cause as the banner listing; the listing thumbnail now uses the
+  backend-absolute URL with a graceful fallback. The edit form is unchanged.
+
+### Files changed
+- server: `controllers/invoiceController.js` (ensureInvoiceNo), `controllers/authController.js`
+  (login/logout) + `routes/authRoutes.js`, `controllers/masterOptionsController.js` (account),
+  `controllers/publicController.js` + `routes/publicRoutes.js` (public banners).
+- client: `context/AuthContext.jsx` (logout call), `pages/admin/ActivityLogs.jsx` (Auth filter),
+  `pages/shared/serviceForms.js` (Airline/Bus/Hotel dropdowns + Flight PNR),
+  `pages/cms/BannerMaster.jsx`, `pages/cms/OurTeamMaster.jsx` (listing images; banner columns),
+  `menuConfig.js` (Company Master Data link).
+
+### Database / API
+- No schema or migration changes. New public route `GET /api/public/banners`; new
+  `POST /api/auth/logout`. Existing response structures preserved.
+
+### Verified
+- `vite build` OK; `node --check` + ESM import OK; route introspection confirms the new public/auth
+  routes. `owner/OwnerLayout.jsx` / `owner/MasterForm.jsx` / `server/package.json` untouched.
+
+### Notes / assumptions
+- Airline/Bus/Hotel all draw from the single `account` master (the Account tab); if you keep separate
+  account groups per type we can filter the dropdown by group — tell me the group identifiers (not
+  hardcoded here). The Hotel field was switched from the `property` master to `account` per req #7.
+- `account` master records are created in the Company-Owner Account master; the seeder's sample row
+  makes at least one option available immediately.
+
+---
+
+## v42 — Service dropdown classification, master-engine activity logs, Super Admin master menu, public Video API
+
+Six requirements. Root cause found first; existing tables/models/routes reused; no hardcoded ids;
+protected **OwnerLayout.jsx** / **MasterForm.jsx** and **server/package.json** untouched.
+
+### #1/#2/#3 — Airline / Bus / Hotel dropdowns classified from `tblAccountMaster`
+Refines v41 (which drew all three from the whole `account` master). Each service dropdown now
+filters the Account records by the **existing account classification** — the linked Account *group*
+(`intGroupID` → `tblGroupMaster`, matched on `strGroupName` / `strNatureOfGroup`) — plus
+account-level signals already on the record:
+- **Airline** — group named like *Airline/Air/Aviation/Carrier*, **or** a non-empty IATA
+  `strAccountAirCode`, **or** `bitAccountLCCCarrier = true`.
+- **Bus** — group named like *Bus/Coach/Roadways/Travels*.
+- **Hotel** — group named like *Hotel/Resort/Property/Accommodation*, **or** the account is
+  referenced by the existing Hotel head master (`tblHotelHead.intAccountID`).
+
+No ids are hardcoded; group ids are resolved live. **Graceful fallback:** if nothing is classified
+yet (fresh DB with no account groups), the dropdown returns all *active* accounts so it stays usable
+instead of empty. Create/edit/view are unchanged — the selected name (`mname`) is still stored and
+printed on the invoice. Active-status filter (`bitAccountActiveStatus ≠ false`) is preserved.
+- `server/controllers/masterOptionsController.js` — `?class=airline|bus|hotel` on the existing
+  `GET /api/services/master-options/account`; group-id resolver; fallback.
+- `client/src/pages/shared/serviceForms.js` — FLIGHT `account:airline`, BUS `account:bus`,
+  HOTEL `account:hotel`.
+- `client/src/pages/shared/ServiceBookingForm.jsx` — `MRefSelect` splits `key:class` → `?class=`.
+
+### #4 — Activity logging on the master engine (the remaining gap)
+Login/logout (v41) and all booking/invoice/credit-note/payment/CMS events (v40) were already logged.
+The one broad gap was **master-data changes** — the 80 master modules (incl. the Account records that
+back Airline/Bus/Hotel). Added logging in `server/masterEngine/masterController.js`:
+- `create` → `CREATE`, `update` → `UPDATE` (with a field-level before/after `diffFields` diff),
+  `remove` → `DELETE`, `bulkRemove` → one `DELETE` with a count.
+- Logged **only after** the DB operation succeeds (no phantom/duplicate entries); secrets are
+  stripped by the existing sanitiser; `module: 'Master'`, the specific master in the message +
+  `meta.master`/`meta.key`.
+- `client/src/pages/admin/ActivityLogs.jsx` — added `Master` to the module filter.
+
+### #5 — Super Admin Master menu opens INSIDE the Super Admin panel (fixes the v41 redirect)
+v41 surfaced a single **“Company Master Data”** link that pointed at `/owner`, dropping the Super
+Admin into the Company Owner shell. Replaced with the real grouped master menu rendered in the
+Super Admin’s own `/app` panel, navigating only within `/app` — never redirecting to the CO area.
+- The master pages are mounted under **`/app/master-data/*`** (Super-Admin-only) using the SAME
+  components and the SAME `/api/owner/masters` API as `/owner`.
+- The protected `OwnerLayout.jsx` / `MasterForm.jsx` are left byte-for-byte: `MasterList`,
+  `AccountForm`, `ContactForm`, `HotelForm` were made **base-aware** via a new `useMasterBase()`
+  hook (derives `/owner` vs `/app/master-data` from the URL), and a base-aware **`MasterFormApp.jsx`**
+  sibling serves the generic create/edit under `/app` (the protected `MasterForm` still serves
+  `/owner`). `/owner` behaviour is unchanged.
+- `client/src/components/layout/Sidebar.jsx` — for Super Admin in the Master area, fetches the
+  catalog and renders the full grouped master menu (`Master · <category>`) linking to
+  `/app/master-data/:key`.
+- `client/src/pages/owner/MasterHub.jsx` — a “Master Data” hub landing listing every master by
+  category. `menuConfig.js` entry re-pointed from `/owner` to `/app/master-data`.
+- Authorization unchanged: `/app/master-data/*` is wrapped in `SAOnly`; the backend master API
+  already allows `SUPER_ADMIN`.
+
+### #6 — Public Video Gallery listing API
+`GET /api/public/video-gallery` — public, read-only, no auth. Reuses the existing `VideoGallery`
+model/data (no new table). Newest first; relative links made absolute via the shared helper.
+The schema carries no active/publish flag, so every gallery row is public (consistent with the
+other public listers). Response matches the project’s existing public convention (a bare array),
+as in `/api/public/banners` and `/api/public/our-team`:
+```json
+[{ "id": "…", "title": "Intro", "description": "…", "video_url": "https://…/video.mp4" }]
+```
+- `server/controllers/publicController.js` — `listVideosPublic`.
+- `server/routes/publicRoutes.js` — `GET /video-gallery`.
+
+### Verification
+- `node --check` + ESM import OK on all changed server files; route introspection confirms PUBLIC
+  includes `/video-gallery` and the master controller exports create/update/remove/bulkRemove.
+- `vite build` OK (175 modules).
+- Protected `OwnerLayout.jsx` / `MasterForm.jsx` and `server/package.json` — unchanged.
+
+---
+
+## v43 — Fix: Airline / Bus / Hotel dropdowns showed no records from `me_account`
+
+**Root cause.** The dropdowns fetch from the correct source (`modelForMaster('account')` → the
+`me_account` collection — the same model the Account listing uses), so the source was never the
+problem. The bug was an over-eager filter introduced when the account dropdown was first added:
+
+```js
+// server/controllers/masterOptionsController.js  (before)
+const filter = key === 'account' ? { bitAccountActiveStatus: { $ne: false } } : {};
+```
+
+`bitAccountActiveStatus` is a boolean saved by the Account form's **Active** toggle, which defaults
+**off**. Accounts created without explicitly turning it on are stored with `bitAccountActiveStatus:
+false`, so `{ $ne: false }` silently excluded them. The result: `me_account` held the records and the
+**Account listing showed them** (its query applies no status filter), but **every service dropdown
+came back empty** — the exact listing-vs-dropdown inconsistency.
+
+**Fix.** Make the dropdown consistent with the Account listing: drop the status exclusion and read
+the same records. Account classification (Airline / Bus / Hotel by the linked account **group**, plus
+airline air-code / Hotel-head signals) is kept as a refinement, and when the accounts aren't
+classified yet the dropdown falls back to **all** accounts instead of hiding them. Added try/catch so
+a query failure returns a 500 (surfacing the error) rather than a silent empty list.
+
+- `server/controllers/masterOptionsController.js` — `baseFilter = {}` (was the `bitAccountActiveStatus`
+  exclusion); classification + fallback now run against the unfiltered set; error handling added.
+- No client change (v42 already sends `?class=airline|bus|hotel`); no new tables, no hardcoded ids,
+  no duplicate records; create/edit/view and the stored value (account name) are unchanged.
+
+**Verification (logic test, old vs new, representative `me_account` rows saved with Active off):**
+- OLD `{ bitAccountActiveStatus: { $ne: false } }` → **0** rows (empty dropdown — bug reproduced).
+- NEW `{}` → **all** rows returned (matches the Account listing).
+- Classified Airline when a group is named "Airlines" → returns only that account.
+- Classified Airline when no group/signal matches → falls back to all accounts (nothing hidden).
+- `node --check` + ESM import OK. Protected `OwnerLayout.jsx` / `MasterForm.jsx` and
+  `server/package.json` unchanged.
+
+If you want the dropdowns to show *active-only* accounts, that filter should be applied to the Account
+listing too (so the two stay consistent) and the Active flag set deliberately on each account — tell
+me and I'll wire it on both. If accounts are classified by a field other than the account group, send
+the field/values and I'll match it precisely.
+
+---
+
+## v44 — Searchable account dropdowns, service-aware PNR From, auth activity logs, Forgot-Password email fix
+
+Six requirements. Root cause found first; existing `me_account` data reused; no hardcoded ids/names;
+protected `OwnerLayout.jsx` / `MasterForm.jsx` and `server/package.json` untouched.
+
+### #1/#2/#3 — Airline / Bus / Hotel: searchable autocomplete over ALL accounts (server-side)
+Per the common rule ("all account records should be available for selection/search, not only a
+subset; do not apply restrictive category filters"), the v42/v43 Airline/Bus/Hotel classification is
+**removed** for these dropdowns. Each is now a **searchable autocomplete** that searches the entire
+`me_account` collection server-side:
+- `server/controllers/masterOptionsController.js` — `GET /api/services/master-options/account`
+  accepts `?search=<partial name>&limit=<n>` (case-insensitive regex on `strAccountName`, capped at
+  25/response). Search scans the whole table, so any account is findable without loading them all;
+  non-searchable masters (CRS, Quota, Meal Plan, Bus Type, Vehicle) are unchanged. Wrapped in
+  try/catch → 500 on failure instead of a silent empty list.
+- `client/src/pages/shared/ServiceBookingForm.jsx` — new `MSearchSelect` autocomplete (debounced
+  typeahead, suggestion list, outside-click close). Stores the account **name** (so it still prints
+  on the invoice and existing bookings stay compatible) and shows the saved value when editing.
+- `client/src/pages/shared/serviceForms.js` — Airline / Bus / Hotel fields use the new `msearch`
+  type → master `account`. Tenant/permission gating (`readStaff`) is unchanged.
+
+### #4 — Airline "PNR From" scoped to the selected service (Railway pattern)
+Railway's service-specific behavior is a master-sourced dropdown scoped to the service. Applied the
+same to the Airline **PNR From** (sourced from the CRS master):
+- `masterOptionsController.js` — `GET …/cRS?service=<SERVICE>` returns CRS entries whose
+  `strCRSName` / `tintCRSType` match the service, falling back to all CRS when nothing is tagged
+  (never empty), reusing the existing CRS master (no hardcoded options).
+- `ServiceBookingForm.jsx` — `MRefSelect` forwards the current service for CRS-sourced fields and
+  **re-fetches when the service changes**, so options stay in sync. Railway's own dropdowns are
+  untouched. (Interpretation note: "PNR From" exists only on the Airline form and the CRS master
+  carries `tintCRSType`; if you want a precise CRS-type→service mapping, send the type codes and
+  I'll match them exactly. The selected value is constrained to CRS options client-side and stored
+  like other booking details.)
+
+### #5 — Activity log: authentication / password events
+Added the events the log was missing, each written only after the operation succeeds, never storing
+tokens or passwords (the logger also sanitises):
+- `FORGOT_PASSWORD` (module `WebsiteAuth`) with a success/failure flag + reason — so a failed
+  delivery is auditable, not silently "sent".
+- `PASSWORD_RESET` on website-customer token reset and on admin reset of a staff user
+  (`authController.resetUserPassword`).
+- `REGISTER` and `LOGIN` for website customers.
+- `client/src/pages/admin/ActivityLogs.jsx` — added the `WebsiteAuth` module filter and the new
+  action styles.
+
+### #6 — Forgot Password email not being sent (root cause + fix)
+**Root cause.** Two problems: (1) the mailer only reads SMTP from Company-Profile Settings
+(`getTransporter` returns `null` when `smtpHost`/`smtpUser` are blank) — if Settings SMTP was never
+filled in, no transporter is created and no mail is sent; and (2) `forgotPassword` wrapped the send
+in `try { … } catch { /* ignore */ }` and **always returned success**, so a non-send was invisible
+to both the caller and the server.
+**Fix** (`server/utils/mailer.js`, `server/controllers/websiteCustomerController.js`):
+- `getTransporter` now falls back to environment SMTP when Settings has none —
+  `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_SECURE/SMTP_FROM[/_NAME]` (also accepts the
+  `MAIL_*` aliases). Nothing hardcoded; Settings still wins when present. `secure` auto-set for 465.
+- `forgotPassword` checks `sendMail`'s `{ sent, error }` result, logs the real failure reason
+  server-side (never the token), and records the outcome in the activity log. The API response
+  stays generic ("if an account exists…") so account existence isn't revealed. Registration's
+  welcome-mail failure is now logged too.
+- Password reset still validates the token + expiry and stores the new password via the existing
+  hashing (`setPassword`); existing login/registration/reset flows are unchanged.
+
+**Environment still required for live delivery:** valid SMTP must exist either in Settings → Company
+Profile or in the server environment (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+`SMTP_FROM`; optional `SMTP_SECURE`, `CLIENT_URL` for the reset link). With neither, the code now
+logs "reset email NOT sent … SMTP not configured" instead of claiming success.
+
+### Verification
+- `node --check` + ESM import OK on all changed server files; `vite build` OK (175 modules).
+- Protected `OwnerLayout.jsx` / `MasterForm.jsx` and `server/package.json` unchanged.

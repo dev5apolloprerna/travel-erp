@@ -7,8 +7,9 @@ import CreditNote from '../models/CreditNote.js';
 import { buildInvoicePdf, invoiceToBuffer } from '../utils/invoicePdf.js';
 import { sendMail } from '../utils/mailer.js';
 import { ownsOrg } from '../middleware/auth.js';
-import { computeService } from '../invoiceCalc.js';
+import { computeService, applyFooter } from '../invoiceCalc.js';
 import { SERVICE_CHARGES } from '../invoiceCalc.js';
+import { logActivity } from '../utils/activityLog.js';
 
 // Extract the common footer fields from a calculator result onto the order.
 const footerFields = (t) => ({
@@ -46,6 +47,8 @@ const loadInvoiceData = async (orderId) => {
  * (set by the admin in Service Master). Falls back sensibly for older data.
  */
 const prefixForOrder = async (order) => {
+  // A package invoice carries several services, so it gets its own PKG-###### sequence.
+  if (order.isPackage) return 'PKG';
   const line = (order.services || [])[0];
   if (line?.serviceRef) {
     const master = await Service.findById(line.serviceRef).select('invoicePrefix name').lean();
@@ -58,10 +61,17 @@ const prefixForOrder = async (order) => {
   return order.invoiceType === 'INTERNATIONAL' ? 'INT' : 'DOM';
 };
 
-/** Assign an invoice number on first generation, e.g. FLT-000001. */
+/**
+ * Assign an invoice number on first generation (e.g. FLT-000001) and ALWAYS persist the order.
+ * Root-cause fix (req #3): previously this returned early when an invoice number already existed,
+ * so on a regenerate — or after a preview/download that had already assigned the number — the newly
+ * computed charge heads and totals were never saved, leaving the stored amount (and the PDF) at 0.
+ * Now the number is only generated when missing, but the order is saved every time.
+ */
 const ensureInvoiceNo = async (order) => {
-  if (order.invoiceNo) return order;
-  order.invoiceNo = await Order.nextInvoiceNo(await prefixForOrder(order));
+  if (!order.invoiceNo) {
+    order.invoiceNo = await Order.nextInvoiceNo(await prefixForOrder(order));
+  }
   if (!order.invoiceDate) order.invoiceDate = new Date();
   await order.save();
   return order;
@@ -152,9 +162,20 @@ export const getForInvoice = async (req, res) => {
   // Tell the screen which service calculator + charge heads to render.
   const serviceType = (data.order.services?.[0]?.serviceType || 'FLIGHT').toUpperCase();
   const def = SERVICE_CHARGES[serviceType] || SERVICE_CHARGES.FLIGHT;
+  // req #3: for a package order, the screen enters one amount per included service instead of the
+  // service-charge grid. Expose the included services so the client can render that breakdown.
+  const packageServices = (data.order.services || []).map((s, i) => ({
+    index: i,
+    serviceType: s.serviceType,
+    label: [s.serviceType, s.airline || s.hotelName || s.train || s.bus || s.visaCountry || s.eventTitle || '']
+      .filter(Boolean).join(' — '),
+  }));
+
   res.json({
     order: data.order,
     party: data.party,
+    isPackage: !!data.order.isPackage,
+    packageServices,
     calc: {
       serviceType,
       isHotel: serviceType === 'HOTEL',
@@ -180,6 +201,42 @@ export const generateInvoiceNo = async (req, res) => {
     return res.status(400).json({ message: 'This order has been cancelled and cannot be invoiced.' });
   if (order.invoiceCancelled)
     return res.status(400).json({ message: 'This invoice was cancelled (a credit note was raised) and cannot be regenerated.' });
+
+  // req #3: a PACKAGE order is billed as one amount per included service. The gross is the sum of
+  // those per-service amounts (recomputed on the backend — client totals are never trusted); the
+  // usual footer (Discount/TDS/TCS/Govt Tax/Service Charge) then applies.
+  if (order.isPackage) {
+    const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+    const submitted = Array.isArray(req.body.packageLines) ? req.body.packageLines : [];
+    // Pair each stored service line with the submitted amount by index; ignore anything else.
+    const lines = (order.services || []).map((s, i) => ({
+      serviceType: s.serviceType,
+      description: [s.serviceType, s.airline || s.hotelName || s.train || s.visaCountry || s.eventTitle || ''].filter(Boolean).join(' — '),
+      amount: round2(submitted[i]?.amount),
+    }));
+    if (lines.some((l) => l.amount < 0))
+      return res.status(400).json({ message: 'Package service amounts cannot be negative.' });
+    const grossTotal = round2(lines.reduce((sum, l) => sum + l.amount, 0));
+    const t = applyFooter(grossTotal, req.body);   // reuse the shared footer math
+    order.invoicePackageLines = lines;
+    order.invoiceCharges = {};
+    order.grossTotal = grossTotal;
+    order.chargesTotal = grossTotal;
+    order.markupTotal = 0;
+    Object.assign(order, footerFields(t));
+    order.serviceCalcType = 'PACKAGE';
+    order.totalAmount = order.netInvoiceAmount;
+    order.invoiceGenerated = true;
+    order.billedToType = billedToTypeFor(order);
+    if (req.body.invoiceNotes !== undefined) order.invoiceNotes = req.body.invoiceNotes;
+    if (req.body.invoiceDate) order.invoiceDate = new Date(req.body.invoiceDate);
+    await ensureInvoiceNo(order);
+    await logActivity(req, { action: 'INVOICE_GENERATE', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Package invoice generated (net ${order.netInvoiceAmount})` });
+    return res.json({
+      invoiceNo: order.invoiceNo, invoiceDate: order.invoiceDate,
+      grossTotal: order.grossTotal, netInvoiceAmount: order.netInvoiceAmount,
+    });
+  }
 
   // Service-wise calculation. The service type comes from the order (not the client),
   // so each service always uses its own formula. Backend recalculates before saving.
@@ -219,6 +276,8 @@ export const generateInvoiceNo = async (req, res) => {
 
   await ensureInvoiceNo(order);                 // assigns number + saves
 
+  await logActivity(req, { action: 'INVOICE_GENERATE', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Invoice generated (net ${order.netInvoiceAmount})` });
+
   res.json({
     invoiceNo: order.invoiceNo,
     invoiceDate: order.invoiceDate,
@@ -236,43 +295,112 @@ export const cancelInvoice = async (req, res) => {
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
   if (!order.invoiceGenerated)
     return res.status(400).json({ message: 'This order has no generated invoice to cancel.' });
-  if (order.invoiceCancelled)
-    return res.status(400).json({ message: 'This invoice is already cancelled (a credit note exists).' });
+  // Idempotency: if already cancelled, return the existing credit note instead of raising a new one
+  // (prevents duplicate credit notes when the action is triggered more than once).
+  if (order.invoiceCancelled) {
+    const existing = order.creditNoteId ? await CreditNote.findById(order.creditNoteId) : null;
+    return res.status(200).json({
+      message: `Invoice ${order.invoiceNo} is already cancelled.`,
+      creditNote: existing, invoiceNo: order.invoiceNo, alreadyCancelled: true,
+    });
+  }
 
-  // Raise the credit note against the cancelled invoice.
-  const creditNoteNo = await CreditNote.nextCreditNoteNo(order.organizationId);
-  const cn = await CreditNote.create({
-    organizationId: order.organizationId || null,
-    creditNoteNo,
-    orderId: order._id,
-    invoiceNo: order.invoiceNo || '',
-    invoiceDate: order.invoiceDate || null,
-    amount: order.netInvoiceAmount || 0,
-    reason: (req.body?.reason || '').toString().trim(),
-    createdBy: req.user?._id,
-  });
+  const reason = (req.body?.reason || '').toString().trim();
+  try {
+    // Raise the credit note FIRST. The order is only marked cancelled after the credit note is
+    // persisted, so a failure here cannot leave a cancelled invoice without its credit note
+    // (requirement: do not silently mark cancellation successful if the accounting op failed).
+    // A unique index on CreditNote.orderId is the final guard against duplicates under races.
+    const creditNoteNo = await CreditNote.nextCreditNoteNo(order.organizationId);
+    const cn = await CreditNote.create({
+      organizationId: order.organizationId || null,
+      creditNoteNo,
+      orderId: order._id,
+      invoiceNo: order.invoiceNo || '',
+      invoiceDate: order.invoiceDate || null,
+      amount: order.netInvoiceAmount || 0,
+      reason,
+      createdBy: req.user?._id,
+    });
 
-  order.invoiceCancelled = true;
-  order.invoiceCancelledAt = new Date();
-  order.invoiceCancelReason = (req.body?.reason || '').toString().trim();
-  order.creditNoteId = cn._id;
-  order.creditNoteNo = cn.creditNoteNo;
-  await order.save();
+    order.invoiceCancelled = true;
+    order.invoiceCancelledAt = new Date();
+    order.invoiceCancelReason = reason;
+    order.creditNoteId = cn._id;
+    order.creditNoteNo = cn.creditNoteNo;
+    await order.save();
 
-  res.json({
-    message: `Invoice ${order.invoiceNo} cancelled. Credit note ${cn.creditNoteNo} raised.`,
-    creditNote: cn,
-    invoiceNo: order.invoiceNo,
-  });
+    await logActivity(req, { action: 'INVOICE_CANCEL', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Invoice cancelled; credit note ${cn.creditNoteNo} raised`, meta: { creditNoteNo: cn.creditNoteNo, reason } });
+
+    return res.json({
+      message: `Invoice ${order.invoiceNo} cancelled. Credit note ${cn.creditNoteNo} raised.`,
+      creditNote: cn,
+      invoiceNo: order.invoiceNo,
+    });
+  } catch (err) {
+    // Duplicate-key (race) → a credit note already exists for this order; treat as success.
+    if (err?.code === 11000) {
+      const existing = await CreditNote.findOne({ orderId: order._id });
+      if (existing && !order.invoiceCancelled) {
+        order.invoiceCancelled = true;
+        order.invoiceCancelledAt = order.invoiceCancelledAt || new Date();
+        order.invoiceCancelReason = order.invoiceCancelReason || reason;
+        order.creditNoteId = existing._id;
+        order.creditNoteNo = existing.creditNoteNo;
+        await order.save();
+      }
+      return res.status(200).json({ message: `Invoice ${order.invoiceNo} cancelled.`, creditNote: existing, invoiceNo: order.invoiceNo });
+    }
+    // Any other failure: do NOT mark the invoice cancelled; report the error.
+    return res.status(500).json({ message: 'Could not generate the credit note; the invoice was not cancelled. Please retry.' });
+  }
 };
 
 // GET /api/invoices/credit-notes  -> list credit notes (org-scoped), newest first.
+// Each row carries the originating order (with the customer/company it bills) so the listing can
+// show Credit Note no, original invoice no, customer/company, amount and date.
 export const listCreditNotes = async (req, res) => {
   const filter = {};
   // Org-scope for non-super-admins (legacy/unset orgs left unrestricted, matching scopeToOrg).
   if (req.user?.role !== 'SUPER_ADMIN' && req.user?.organizationId) filter.organizationId = req.user.organizationId;
   const rows = await CreditNote.find(filter)
-    .populate('orderId', 'orderNo module')
+    .populate({
+      path: 'orderId',
+      select: 'orderNo module customerId companyId',
+      populate: [
+        { path: 'customerId', select: 'name' },
+        { path: 'companyId', select: 'name' },
+      ],
+    })
     .sort({ createdAt: -1 });
-  res.json(rows);
+  // Flatten a convenient party name without changing the stored structure.
+  const out = rows.map((r) => {
+    const o = r.orderId;
+    const party = o?.customerId?.name || o?.companyId?.name || '—';
+    return { ...r.toObject(), party };
+  });
+  res.json(out);
+};
+
+// GET /api/invoices/credit-notes/:id/pdf  -> the Credit Note document (reuses the invoice template).
+export const downloadCreditNote = async (req, res) => {
+  const cn = await CreditNote.findById(req.params.id);
+  if (!cn) return res.status(404).json({ message: 'Credit note not found' });
+  if (req.user?.role !== 'SUPER_ADMIN' && req.user?.organizationId &&
+      cn.organizationId && String(cn.organizationId) !== String(req.user.organizationId)) {
+    return res.status(404).json({ message: 'Credit note not found' });
+  }
+  const data = await loadInvoiceData(cn.orderId);
+  if (!data) return res.status(404).json({ message: 'Credit note not found' });
+
+  // Render the cancelled invoice's figures as a CREDIT NOTE, numbered with the CN number. The
+  // amounts/taxes are the original invoice's (the credited amount); a note references the invoice.
+  const order = (data.order.toObject ? data.order.toObject() : { ...data.order });
+  order.invoiceNo = cn.creditNoteNo;
+  order.invoiceCancelled = false;   // the credit note itself is not "cancelled"
+  order.invoiceNotes = `Credit note against Invoice ${cn.invoiceNo || '—'}` + (cn.reason ? ` · ${cn.reason}` : '');
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${cn.creditNoteNo}.pdf"`);
+  buildInvoicePdf({ order, settings: data.settings, party: data.party, docTitle: 'CREDIT NOTE' }, res);
 };

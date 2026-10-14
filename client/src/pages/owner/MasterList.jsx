@@ -3,13 +3,15 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../../api/client';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { RowActions, Chip } from '../../components/ui';
+import { useMasterBase } from './useMasterBase';
 
 const PAGE_SIZE = 25;
 
-// Generic master LIST page. Route: /owner/:key
+// Generic master LIST page. Mounted at /owner/:key and /app/master-data/:key (req #5).
 export default function MasterList() {
   const { key } = useParams();
   const nav = useNavigate();
+  const base = useMasterBase();
   const confirm = useConfirm();
   const fileRef = useRef(null);
 
@@ -103,7 +105,7 @@ export default function MasterList() {
       {/* Title left, Back button right-aligned on the same line (#8) */}
       <div className="mb-5 flex items-center justify-between gap-3">
         <h1 className="text-[27px] font-extrabold leading-tight text-ink">{def.label}</h1>
-        <button onClick={() => nav('/owner')} className="btn-ghost btn-sm shrink-0">← Back</button>
+        <button onClick={() => nav(base)} className="btn-ghost btn-sm shrink-0">← Back</button>
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
@@ -115,7 +117,7 @@ export default function MasterList() {
         {selected.length > 0 && (
           <button onClick={bulkDelete} className="btn-danger btn-sm">Delete selected ({selected.length})</button>
         )}
-        <Link to={`/owner/${key}/create`} className="btn-primary btn-sm ml-auto">+ Add {def.label}</Link>
+        <Link to={`${base}/${key}/create`} className="btn-primary btn-sm ml-auto">+ Add {def.label}</Link>
       </div>
 
       {notice && <div className={`mb-4 rounded-lg px-3 py-2 text-sm ${noticeColor}`}>{notice.text}</div>}
@@ -151,7 +153,7 @@ export default function MasterList() {
                   </td>
                   <td className="td font-mono text-[12.5px] text-ink-muted">{meta.startIndex + i + 1}</td>
                   {cols.map((c) => <td key={c} className="td">{cell(row, c)}</td>)}
-                  <td className="td whitespace-nowrap"><RowActions onEdit={() => nav(`/owner/${key}/${row._id}/edit`)} onDelete={() => del(row)} /></td>
+                  <td className="td whitespace-nowrap"><RowActions onEdit={() => nav(`${base}/${key}/${row._id}/edit`)} onDelete={() => del(row)} /></td>
                 </tr>
               ))}
             </tbody>

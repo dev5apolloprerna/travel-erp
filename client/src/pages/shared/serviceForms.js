@@ -5,7 +5,10 @@
 // field: [key, label, type?, options?]
 // type defaults to 'text'. Supported: text, date, number, select, checkbox
 const FLIGHT = [
-  ['airline', 'Airline'],
+  // Airline: searchable autocomplete over ALL Account records (me_account) — server-side search,
+  // no category filter (req #1). Stores the name so it prints on the invoice as before.
+  ['airline', 'Airline', 'msearch', 'account'],
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['fromStock', 'From Stock?', 'select', ['', 'Yes', 'No']],
   ['pnrFrom', 'PNR From?', 'mref', 'cRS'],
   ['ticketNo', 'Ticket No.'],
@@ -39,7 +42,8 @@ const RAILWAY = [
 
 // Bus — same layout as railway, worded for buses.
 const BUS = [
-  ['bus', 'Bus'],
+  // Bus: searchable autocomplete over ALL Account records (me_account) — req #2.
+  ['bus', 'Bus', 'msearch', 'account'],
   ['busType', 'Bus Type', 'mref', 'busType'],
   ['status', 'Status', 'select', ['Confirm', 'RAC', 'Waitlist', 'Tatkal']],
   ['ticketNo', 'Ticket No.'],
@@ -106,7 +110,8 @@ const CAB = [
 // Hotel has a repeatable room-row section handled specially in the form component.
 const HOTEL = [
   ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
-  ['hotelName', 'Hotel Name', 'mname', 'property'],
+  // Hotel: searchable autocomplete over ALL Account records (me_account) — req #3.
+  ['hotelName', 'Hotel Name', 'msearch', 'account'],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
   ['adults', 'Adults', 'number'],
   ['children', 'Children', 'number'],

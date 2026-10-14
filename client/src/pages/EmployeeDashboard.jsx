@@ -1,48 +1,43 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import api from '../api/client';
-import { PageHeader, StatCard, Card, money } from '../components/ui';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useArea } from '../context/AreaContext';
+import { PageHeader, Card } from '../components/ui';
+import { availableAreas, visibleMenu } from '../menuConfig';
 
+const ICONS = { website: '🌐', booking: '🧳', account: '🧾', master: '🗂️' };
+
+/** Landing page: pick one of the four sections — Website, Booking, Account, Master.
+ *  Only sections the user is authorised for are shown. */
 export default function EmployeeDashboard() {
-  const [stats, setStats] = useState({ customers: 0, orders: 0, companies: 0 });
+  const { user } = useAuth();
+  const nav = useNavigate();
+  const { setActiveArea } = useArea();
+  const areas = availableAreas(user);
+  const groups = visibleMenu(user);
 
-  useEffect(() => {
-    Promise.all([
-      api.get('/retail/customers').catch(() => ({ data: [] })),
-      api.get('/retail/orders').catch(() => ({ data: [] })),
-      api.get('/b2b/companies').catch(() => ({ data: [] })),
-    ]).then(([c, o, co]) => {
-      const due = o.data.reduce((s, x) => s + (x.totalAmount - x.paidAmount), 0);
-      setStats({ customers: c.data.length, orders: o.data.length, companies: co.data.length, due });
-    });
-  }, []);
+  const openArea = (key) => {
+    setActiveArea(key);
+    const first = groups.find((g) => g.area === key)?.items?.[0];
+    nav(first ? first.to : '/app');
+  };
 
   return (
     <div>
-      <PageHeader eyebrow="Overview" title="Dashboard" />
+      <PageHeader eyebrow={`Welcome${user?.name ? `, ${user.name}` : ''}`} title="Dashboard" />
+      <p className="mb-5 text-sm text-ink-muted">Choose a section to get started.</p>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard value={stats.customers} label="Retail Customers" />
-        <StatCard value={stats.orders} label="Retail Orders" />
-        <StatCard value={stats.companies} label="B2B Companies" />
-        <StatCard value={money(stats.due || 0)} label="Retail Pending" />
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <Card title="Retail">
-          <p className="mb-4 text-sm text-ink-muted">Create customers and book flights, hotels, transfers and packages.</p>
-          <div className="flex flex-wrap gap-2">
-            <Link to="/app/retail/customers/new" className="btn-primary btn-sm">New customer</Link>
-            <Link to="/app/retail/orders" className="btn-ghost btn-sm">View orders</Link>
-          </div>
-        </Card>
-        <Card title="B2B">
-          <p className="mb-4 text-sm text-ink-muted">Manage companies, members and lump-sum account payments.</p>
-          <Link to="/app/b2b/companies" className="btn-ghost btn-sm">Companies</Link>
-        </Card>
-        <Card title="Society">
-          <p className="mb-4 text-sm text-ink-muted">Clusters, grades, DR &amp; employee masters and bookings.</p>
-          <Link to="/app/fit" className="btn-ghost btn-sm">Society dashboard</Link>
-        </Card>
+        {areas.map((a) => (
+          <button key={a.key} type="button" onClick={() => openArea(a.key)} className="text-left">
+            <Card className="h-full transition hover:border-brand hover:shadow-pop">
+              <div className="mb-2 text-3xl">{ICONS[a.key] || '📁'}</div>
+              <div className="text-lg font-extrabold text-ink">{a.label}</div>
+              <p className="mt-1 text-sm text-ink-muted">{a.desc}</p>
+            </Card>
+          </button>
+        ))}
+        {areas.length === 0 && (
+          <Card><p className="text-sm text-ink-muted">You don't have access to any sections yet. Please contact your administrator.</p></Card>
+        )}
       </div>
     </div>
   );
