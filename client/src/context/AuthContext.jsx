@@ -24,6 +24,14 @@ export function AuthProvider({ children }) {
     const res = await api.post('/auth/login', { email, password, expectedRole });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
+    // Flag a one-time Switch-Section popup for the /app shell (Super Admin / Employee). Consumed
+    // once by AppLayout so it shows after login but not on refresh (req #2). Company Owner uses a
+    // separate shell and is unaffected.
+    try {
+      if (['SUPER_ADMIN', 'EMPLOYEE'].includes(res.data.user?.role)) {
+        sessionStorage.setItem('postLoginSwitch', '1');
+      }
+    } catch { /* storage unavailable — popup simply won't auto-open */ }
     return res.data.user;
   };
 

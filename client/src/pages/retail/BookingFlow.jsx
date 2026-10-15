@@ -144,7 +144,7 @@ export default function BookingFlow() {
   const typeLabel = invoiceType === 'DOMESTIC' ? 'Domestic' : 'International';
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-4xl">
       <PageHeader eyebrow="Retail" title={editId ? 'Edit booking' : 'New booking'} />
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 

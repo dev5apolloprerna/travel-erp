@@ -49,12 +49,14 @@ export default function MemberPortal() {
 
       {tab === 'orders' && (
       <Card title="My orders">
-        <Table head={['Order', 'Services', 'Date', 'Amount']}>
-          {data.orders.length === 0 && <tr><td className="td text-ink-muted" colSpan={4}>No orders yet.</td></tr>}
+        <Table head={['Order', 'Services', 'Invoice', 'Status', 'Date', 'Amount']}>
+          {data.orders.length === 0 && <tr><td className="td text-ink-muted" colSpan={6}>No orders yet.</td></tr>}
           {data.orders.map((o) => (
             <tr key={o._id}>
               <td className="td font-medium text-ink">{o.orderNo}</td>
               <td className="td">{o.services?.map((s) => s.serviceType).join(', ')}</td>
+              <td className="td font-mono">{o.invoiceGenerated ? (o.invoiceNo || '—') : '—'}</td>
+              <td className="td">{o.cancelled ? 'Cancelled' : o.invoiceCancelled ? 'Invoice cancelled' : o.invoiceGenerated ? 'Invoiced' : 'Pending'}</td>
               <td className="td">{new Date(o.createdAt).toLocaleDateString()}</td>
               <td className="td">{money(o.totalAmount)}</td>
             </tr>

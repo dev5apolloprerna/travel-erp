@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import UserMenu from '../../components/layout/UserMenu';   // shared header dropdown (req #1)
 
 // Dedicated Company Owner shell — two-level sidebar (menu group → master items),
 // styled to the wireframe. Collapses to an off-canvas drawer on mobile (#13).
@@ -78,22 +79,22 @@ export default function OwnerLayout() {
           })}
         </nav>
 
-        {/* Footer */}
+        {/* Footer — signed-in name (logout now lives in the shared header dropdown, req #1). */}
         <div className="border-t border-subtle px-[18px] pb-4 pt-3.5">
-          <div className="mb-2 truncate text-[10.5px] font-bold uppercase tracking-wide text-ink-muted/70">{user?.name || 'Company Owner'}</div>
-          <button onClick={doLogout} className="btn-ghost btn-sm w-full">Log out</button>
+          <div className="truncate text-[10.5px] font-bold uppercase tracking-wide text-ink-muted/70">{user?.name || 'Company Owner'}</div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile top bar with hamburger */}
-        <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-white px-4 py-3 md:hidden">
-          <button onClick={() => setDrawer(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-line text-ink-soft" aria-label="Open menu">
+        {/* Header bar — hamburger (mobile) on the left, shared user dropdown on the right so the
+            Company Owner gets the same name + Log out menu as Super Admin / Employee (req #1). */}
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-white/80 px-4 py-3 backdrop-blur sm:px-6 md:px-8">
+          <button onClick={() => setDrawer(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-line text-ink-soft md:hidden" aria-label="Open menu">
             <span className="text-lg leading-none">☰</span>
           </button>
-          <img src="/logo.png" alt="360" className="h-7 w-7 rounded-md object-contain" />
-          <span className="text-sm font-bold text-ink">Company Owner</span>
-        </div>
+          <div className="hidden md:block" />
+          <UserMenu user={user} roleLabel="Company Owner" onLogout={doLogout} />
+        </header>
 
         <main className="min-w-0 flex-1 px-4 pb-16 pt-6 sm:px-6 md:px-10 md:pt-9">
           <Outlet />

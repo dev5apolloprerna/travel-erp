@@ -88,7 +88,7 @@ export default function SupplierInvoices() {
       </div></div>
 
       {form && (
-        <Modal title={editId ? 'Edit supplier invoice' : 'New supplier invoice'} onClose={() => setForm(null)} maxWidth="max-w-5xl">
+        <Modal title={editId ? 'Edit supplier invoice' : 'New supplier invoice'} onClose={() => setForm(null)} maxWidth="max-w-3xl">
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Main Company *">

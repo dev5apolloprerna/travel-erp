@@ -4,6 +4,7 @@ import Company from '../models/Company.js';
 import Settings from '../models/Settings.js';
 import Service from '../models/Service.js';
 import CreditNote from '../models/CreditNote.js';
+import { ensureCreditNoteForOrder } from '../services/creditNoteService.js';
 import { buildInvoicePdf, invoiceToBuffer } from '../utils/invoicePdf.js';
 import { sendMail } from '../utils/mailer.js';
 import { ownsOrg } from '../middleware/auth.js';
@@ -307,51 +308,26 @@ export const cancelInvoice = async (req, res) => {
 
   const reason = (req.body?.reason || '').toString().trim();
   try {
-    // Raise the credit note FIRST. The order is only marked cancelled after the credit note is
-    // persisted, so a failure here cannot leave a cancelled invoice without its credit note
-    // (requirement: do not silently mark cancellation successful if the accounting op failed).
-    // A unique index on CreditNote.orderId is the final guard against duplicates under races.
-    const creditNoteNo = await CreditNote.nextCreditNoteNo(order.organizationId);
-    const cn = await CreditNote.create({
-      organizationId: order.organizationId || null,
-      creditNoteNo,
-      orderId: order._id,
-      invoiceNo: order.invoiceNo || '',
-      invoiceDate: order.invoiceDate || null,
-      amount: order.netInvoiceAmount || 0,
-      reason,
-      createdBy: req.user?._id,
-    });
-
-    order.invoiceCancelled = true;
-    order.invoiceCancelledAt = new Date();
-    order.invoiceCancelReason = reason;
-    order.creditNoteId = cn._id;
-    order.creditNoteNo = cn.creditNoteNo;
+    // Reuse the shared credit-note service (req #4/#5). It raises/links the credit note; the order
+    // is only saved (marked invoice-cancelled) after the note is persisted, so a failure cannot
+    // leave a cancelled invoice without its credit note. The unique index on CreditNote.orderId is
+    // the final guard against duplicates under concurrent submits.
+    const { status, creditNote } = await ensureCreditNoteForOrder(order, { user: req.user, reason });
     await order.save();
 
-    await logActivity(req, { action: 'INVOICE_CANCEL', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Invoice cancelled; credit note ${cn.creditNoteNo} raised`, meta: { creditNoteNo: cn.creditNoteNo, reason } });
+    if (status === 'created') {
+      await logActivity(req, { action: 'INVOICE_CANCEL', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Invoice cancelled; credit note ${creditNote.creditNoteNo} raised`, meta: { creditNoteNo: creditNote.creditNoteNo, reason } });
+    }
 
     return res.json({
-      message: `Invoice ${order.invoiceNo} cancelled. Credit note ${cn.creditNoteNo} raised.`,
-      creditNote: cn,
+      message: status === 'created'
+        ? `Invoice ${order.invoiceNo} cancelled. Credit note ${creditNote.creditNoteNo} raised.`
+        : `Invoice ${order.invoiceNo} cancelled.`,
+      creditNote: creditNote || null,
       invoiceNo: order.invoiceNo,
     });
   } catch (err) {
-    // Duplicate-key (race) → a credit note already exists for this order; treat as success.
-    if (err?.code === 11000) {
-      const existing = await CreditNote.findOne({ orderId: order._id });
-      if (existing && !order.invoiceCancelled) {
-        order.invoiceCancelled = true;
-        order.invoiceCancelledAt = order.invoiceCancelledAt || new Date();
-        order.invoiceCancelReason = order.invoiceCancelReason || reason;
-        order.creditNoteId = existing._id;
-        order.creditNoteNo = existing.creditNoteNo;
-        await order.save();
-      }
-      return res.status(200).json({ message: `Invoice ${order.invoiceNo} cancelled.`, creditNote: existing, invoiceNo: order.invoiceNo });
-    }
-    // Any other failure: do NOT mark the invoice cancelled; report the error.
+    // Any failure: do NOT mark the invoice cancelled; report the error (no false success).
     return res.status(500).json({ message: 'Could not generate the credit note; the invoice was not cancelled. Please retry.' });
   }
 };

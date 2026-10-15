@@ -148,7 +148,7 @@ export default function PassengerList() {
       </Table>
 
       {form && (
-        <Modal title={editId ? `Edit passenger — ${form.name}` : 'Add passenger'} onClose={() => setForm(null)} maxWidth="max-w-5xl">
+        <Modal title={editId ? `Edit passenger — ${form.name}` : 'Add passenger'} onClose={() => setForm(null)} maxWidth="max-w-4xl">
           <div className="max-h-[65vh] overflow-y-auto pr-1">
             {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 

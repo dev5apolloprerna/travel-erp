@@ -86,7 +86,7 @@ export default function WebsiteBookings() {
       </Table>
 
       {detail && (
-        <Modal title={`Booking ${detail.bookingNo}`} onClose={() => setDetail(null)} maxWidth="max-w-5xl">
+        <Modal title={`Booking ${detail.bookingNo}`} onClose={() => setDetail(null)} maxWidth="max-w-3xl">
           {msg && (
             <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${msg.type === 'ok' ? 'bg-accent-light text-accent-dark' : 'bg-red-50 text-red-600'}`}>
               {msg.text}

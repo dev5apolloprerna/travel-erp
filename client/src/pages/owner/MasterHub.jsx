@@ -11,6 +11,7 @@ const BASE = '/app/master-data';
 
 export default function MasterHub() {
   const [groups, setGroups] = useState({});
+  const [counts, setCounts] = useState({});   // { key: totalRecords } — req #3
 
   useEffect(() => {
     api.get('/owner/masters').then((r) => {
@@ -19,6 +20,8 @@ export default function MasterHub() {
       for (const m of r.data) { if (m.virtual) continue; (g[m.menu] = g[m.menu] || []).push(m); }
       setGroups(g);
     }).catch(() => setGroups({}));
+    // One batched call for all record counts (no per-card queries).
+    api.get('/owner/masters/counts').then((r) => setCounts(r.data || {})).catch(() => setCounts({}));
   }, []);
 
   const menus = Object.keys(groups);
@@ -39,8 +42,9 @@ export default function MasterHub() {
             <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               {groups[menu].map((m) => (
                 <Link key={m.key} to={`${BASE}/${m.key}`}
-                  className="rounded-xl2 border border-line bg-white px-4 py-3 text-[13.5px] font-medium text-ink-soft shadow-card transition hover:border-brand hover:text-brand">
-                  {m.label}
+                  className="flex items-center justify-between gap-2 rounded-xl2 border border-line bg-white px-4 py-3 text-[13.5px] font-medium text-ink-soft shadow-card transition hover:border-brand hover:text-brand">
+                  <span>{m.label}</span>
+                  <span className="shrink-0 rounded-full bg-faint px-2 py-0.5 text-[11.5px] font-bold text-ink-muted">{counts[m.key] ?? 0}</span>
                 </Link>
               ))}
             </div>

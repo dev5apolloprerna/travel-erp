@@ -259,9 +259,18 @@ export const listCompanyOrders = async (req, res) => {
 };
 
 // ---- Member portal: own orders (view only) ----
+// req #2: a B2B member must see every order that belongs to THEIR company — including orders an
+// Admin / Company Owner / employee created for the company — not only the ones tagged with this
+// member's id. Root cause of the empty list: the query filtered on `requestedByMemberId` alone, so
+// admin-created company orders (different/blank requesting member) were excluded. We now scope by
+// the member's own company, which keeps tenant isolation (never another company's orders) and
+// carries the invoice fields already stored on each Order (invoiceNo / invoiceGenerated / status).
 export const myOrders = async (req, res) => {
-  const orders = await Order.find({ module: 'B2B', requestedByMemberId: req.user._id }).sort('-createdAt');
-  const company = await Company.findById(req.user.companyId);
+  const filter = req.user.companyId
+    ? { module: 'B2B', companyId: req.user.companyId }
+    : { module: 'B2B', requestedByMemberId: req.user._id };   // safety fallback if unlinked
+  const orders = await Order.find(filter).sort('-createdAt');
+  const company = req.user.companyId ? await Company.findById(req.user.companyId) : null;
   res.json({ orders, company });
 };
 

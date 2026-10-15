@@ -109,7 +109,7 @@ export default function DestinationMaster() {
       </Table>
 
       {form && (
-        <Modal title={editId ? `Edit ${form.name}` : 'Add destination'} onClose={() => setForm(null)} maxWidth="max-w-5xl">
+        <Modal title={editId ? `Edit ${form.name}` : 'Add destination'} onClose={() => setForm(null)} maxWidth="max-w-4xl">
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
           <Tabs active={tab} onChange={setTab} tabs={[

@@ -21,7 +21,7 @@ export default function OrderDetail() {
 
   // req #2: cancellation only after the invoice is generated (backend re-validates).
   const cancel = async () => {
-    if (await confirm({ title: 'Cancel order?', message: `Order ${order.orderNo} will be marked as cancelled. This cannot be undone.` })) {
+    if (await confirm({ title: 'Cancel order?', message: `Order ${order.orderNo} will be cancelled and a credit note will be raised against its invoice. This cannot be undone.` })) {
       await api.put(`/retail/orders/${order._id}/cancel`); load();
     }
   };
@@ -34,7 +34,7 @@ export default function OrderDetail() {
   const release = async () => { await api.put(`/retail/orders/${order._id}/release`); load(); };
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-3xl">
       <PageHeader eyebrow="Retail" title={`Order ${order.orderNo}`}
         actions={<div className="flex items-center gap-2">
           {order.isPackage && <Badge status="PARTIAL">Package · {order.services?.length || 0} services</Badge>}
