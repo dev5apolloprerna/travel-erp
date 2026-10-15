@@ -38,7 +38,7 @@ export default function DivisionMaster() {
   };
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-3xl">
       <PageHeader eyebrow="FIT Masters" title="Division Master" />
       {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
       {(canCreate || canEdit) && (

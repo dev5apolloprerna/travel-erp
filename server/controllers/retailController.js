@@ -10,6 +10,7 @@ import Settings from '../models/Settings.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
 import { sendCredentialsMail } from '../utils/mailer.js';
 import { logActivity, diffFields } from '../utils/activityLog.js';
+import { ensureCreditNoteForOrder } from '../services/creditNoteService.js';
 
 const genPassword = () => Math.random().toString(36).slice(-8);
 
@@ -262,8 +263,12 @@ export const releaseOrder = async (req, res) => {
   res.json(order);
 };
 
-// req #2: cancellation is only allowed AFTER the invoice has been generated. Validated
-// on the actual order/invoice state (not just UI), so a direct request cannot bypass it.
+// Order cancellation (Booking → Order). The existing rule stands: an order is only cancellable
+// AFTER its invoice has been generated (before that, orders are edited/deleted, not cancelled) —
+// validated on the actual state so a direct request can't bypass it.
+// v46 (req #2/#3): cancelling an INVOICED order now also raises the credit note, through the SAME
+// shared service the Invoice screen uses. Scenario A (no invoice) raises none; Scenario C (already
+// cancelled / credit note already present) is idempotent — no duplicate note, no repeated work.
 export const cancelOrder = async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
@@ -271,12 +276,28 @@ export const cancelOrder = async (req, res) => {
     return res.status(400).json({ message: 'An order can only be cancelled after its invoice has been generated.' });
   if (order.cancelled)
     return res.status(400).json({ message: 'This order is already cancelled.' });
-  order.cancelled = true;
-  order.cancelledAt = new Date();
-  order.cancelReason = (req.body?.reason || '').toString().trim();
-  await order.save();
-  await logActivity(req, { action: 'CANCEL', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order cancelled', meta: { reason: order.cancelReason } });
-  res.json(order);
+
+  const reason = (req.body?.reason || '').toString().trim();
+  try {
+    // Raise/link the credit note FIRST (Scenario B). If it fails, the order is NOT saved, so we
+    // never leave an order cancelled without its required credit note.
+    const result = await ensureCreditNoteForOrder(order, { user: req.user, reason });
+
+    order.cancelled = true;
+    order.cancelledAt = new Date();
+    order.cancelReason = reason;
+    await order.save();   // one write persists both the cancel flags and the credit-note link
+
+    await logActivity(req, { action: 'CANCEL', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order cancelled', meta: { reason, creditNoteNo: result.creditNote?.creditNoteNo || null } });
+    if (result.status === 'created') {
+      await logActivity(req, { action: 'INVOICE_CANCEL', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Credit note ${result.creditNote.creditNoteNo} raised on order cancellation`, meta: { creditNoteNo: result.creditNote.creditNoteNo, reason } });
+    }
+
+    return res.json({ ...order.toObject(), creditNote: result.creditNote || null, creditNoteStatus: result.status });
+  } catch (err) {
+    // Credit-note generation failed → do NOT cancel the order; report it (no partial state).
+    return res.status(500).json({ message: 'Could not generate the credit note; the order was not cancelled. Please retry.' });
+  }
 };
 
 // ---- Payments (retail: order-linked, partial/full) ----

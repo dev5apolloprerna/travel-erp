@@ -76,6 +76,21 @@ export const catalog = (req, res) => {
   res.json([...masters, ...companyMenu]);
 };
 
+// GET /api/owner/masters/counts  -> { <key>: totalRecords } for every (non-hidden) master.
+// Counts are read in parallel with estimatedDocumentCount — a fast collection-level count that
+// matches the listing's unfiltered total (the owner master list applies no status filter), so the
+// numbers on the cards agree with the listing pages. One batched call avoids per-card round-trips.
+// The master-engine collections are company-global, so Super Admin and Company Owner see the same
+// totals here; masters that carry an organization would be scoped by their own controllers.
+export const counts = async (req, res) => {
+  const defs = Object.values(MASTERS).filter((m) => !m.hidden);
+  const entries = await Promise.all(defs.map(async (d) => {
+    try { return [d.key, await modelForMaster(d.key).estimatedDocumentCount()]; }
+    catch { return [d.key, 0]; }
+  }));
+  res.json(Object.fromEntries(entries));
+};
+
 // GET /api/owner/masters/:key/def
 export const definition = (req, res) => {
   const def = defOr404(req.params.key, res);

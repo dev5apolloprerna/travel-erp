@@ -5,6 +5,7 @@ import Service from '../models/Service.js';
 import Settings from '../models/Settings.js';
 import { applyGstToServices, isInterState } from '../utils/gst.js';
 import { logActivity } from '../utils/activityLog.js';
+import { ensureCreditNoteForOrder } from '../services/creditNoteService.js';
 
 // Generic CRUD factory for simple masters (now with activity logging, req #1).
 const crud = (Model, populate, moduleName = 'Master') => ({
@@ -166,4 +167,34 @@ export const deleteOrder = async (req, res) => {
   await Order.findByIdAndDelete(req.params.id);
   if (existing) await logActivity(req, { action: 'DELETE', module: 'Order', recordId: existing._id, recordLabel: existing.orderNo, message: 'Society order deleted' });
   res.json({ message: 'Order deleted' });
+};
+
+// req #3: cancel a Society order, following the SAME workflow as retail/B2B order cancellation.
+// Reuses the shared credit-note service so Scenario B (invoice exists) raises the linked credit note
+// through the existing process, Scenario A (no invoice) raises none, and Scenario C (repeat) is
+// idempotent. The order is only marked cancelled after the credit note is persisted.
+export const cancelOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order || order.module !== 'FIT') return res.status(404).json({ message: 'Order not found' });
+  if (!order.invoiceGenerated)
+    return res.status(400).json({ message: 'An order can only be cancelled after its invoice has been generated.' });
+  if (order.cancelled)
+    return res.status(400).json({ message: 'This order is already cancelled.' });
+
+  const reason = (req.body?.reason || '').toString().trim();
+  try {
+    const result = await ensureCreditNoteForOrder(order, { user: req.user, reason });
+    order.cancelled = true;
+    order.cancelledAt = new Date();
+    order.cancelReason = reason;
+    await order.save();
+
+    await logActivity(req, { action: 'CANCEL', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Society order cancelled', meta: { reason, creditNoteNo: result.creditNote?.creditNoteNo || null } });
+    if (result.status === 'created') {
+      await logActivity(req, { action: 'INVOICE_CANCEL', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Credit note ${result.creditNote.creditNoteNo} raised on Society order cancellation`, meta: { creditNoteNo: result.creditNote.creditNoteNo, reason } });
+    }
+    return res.json({ ...order.toObject(), creditNote: result.creditNote || null, creditNoteStatus: result.status });
+  } catch (err) {
+    return res.status(500).json({ message: 'Could not generate the credit note; the order was not cancelled. Please retry.' });
+  }
 };

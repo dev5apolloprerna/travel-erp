@@ -37,7 +37,7 @@ export default function OrderList() {
   // re-validates). It is a soft cancel that keeps the record for invoice history.
   const cancel = async (e, o) => {
     e.stopPropagation();
-    if (await confirm({ title: 'Cancel order?', message: `Order ${o.orderNo} will be marked as cancelled. This cannot be undone.` })) {
+    if (await confirm({ title: 'Cancel order?', message: `Order ${o.orderNo} will be cancelled and a credit note will be raised against its invoice. This cannot be undone.` })) {
       await api.put(`/retail/orders/${o._id}/cancel`); load();
     }
   };

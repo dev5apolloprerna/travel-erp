@@ -69,7 +69,7 @@ export default function CategoryMaster() {
       </Table>
 
       {form && (
-        <Modal title={editId ? `Edit ${form.name}` : 'Add category'} onClose={() => setForm(null)} maxWidth="max-w-5xl">
+        <Modal title={editId ? `Edit ${form.name}` : 'Add category'} onClose={() => setForm(null)} maxWidth="max-w-3xl">
           {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
           <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
             {/* Basics */}

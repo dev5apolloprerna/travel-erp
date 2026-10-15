@@ -2017,3 +2017,186 @@ logs "reset email NOT sent … SMTP not configured" instead of claiming success.
 ### Verification
 - `node --check` + ESM import OK on all changed server files; `vite build` OK (175 modules).
 - Protected `OwnerLayout.jsx` / `MasterForm.jsx` and `server/package.json` unchanged.
+
+---
+
+## v45 — Section-switch popup, master record counts, credit-note workflow audit
+
+Five requirements. Existing components/permissions reused; protected `OwnerLayout.jsx` /
+`MasterForm.jsx` and `server/package.json` untouched; no schema changes.
+
+### #1/#2 — "Switch section" popup replaces the header section tabs (+ opens once after login)
+- `client/src/components/layout/Topbar.jsx` — removed the four direct section controls
+  (Website / Booking / Account / Master). The header now shows a **profile dropdown** (click the
+  name) with **Switch section** and **Log out**. Clean, responsive, matches the design system.
+- `client/src/components/layout/SectionSwitcher.jsx` (new) — one reusable popup listing the
+  sections the signed-in user is authorised for (`availableAreas`), routing to that section's
+  landing via the existing menu/area logic. Shown "no access" state when a user has no sections.
+- `client/src/components/layout/AppLayout.jsx` — owns the popup open-state, passes the trigger to
+  the Topbar dropdown, and **auto-opens the popup once after login** by consuming a one-shot
+  `sessionStorage` flag — so it does **not** reopen on refresh or navigation.
+- `client/src/context/AuthContext.jsx` — `login()` sets that one-shot flag for Super Admin /
+  Employee only; Company Owner's separate `/owner` shell is unaffected.
+- Same component + logic drive both the header dropdown and the post-login popup (no duplication).
+  Destinations stay guarded by the existing authorization middleware.
+
+### #3/#4 — Master record counts (Super Admin hub + Company Owner dashboard)
+- `server/masterEngine/masterController.js` — new `counts` controller returning
+  `{ <masterKey>: total }` for every non-hidden master, read in parallel with
+  `estimatedDocumentCount` (fast, collection-level, matches the listing's unfiltered total). One
+  batched call — no per-card queries.
+- `server/routes/ownerRoutes.js` — `GET /api/owner/masters/counts` (registered before
+  `/masters/:key` so it isn't captured by the param route; same `COMPANY_OWNER` + `SUPER_ADMIN`
+  guard as the rest of the master area).
+- `client/src/pages/owner/MasterHub.jsx` (Super Admin → Administration → Master Data) and
+  `client/src/pages/owner/OwnerDashboard.jsx` (Company Owner) now show a count badge beside each
+  master name; empty tables show `0`. Cards keep their existing layout, links and navigation.
+- Scope note: the master-engine collections are company-global, so Super Admin and Company Owner
+  see the same totals for these masters; counts follow the same (no-status-filter) rule as the
+  listing pages. Masters that carry an organization would be scoped by their own controllers.
+
+### #5 — Invoice cancellation → credit note (audit; already correct, no change needed)
+Full trace of the existing workflow:
+- **Behavior:** cancelling a generated invoice **automatically raises a linked Credit Note** (option
+  1). The credit note is created FIRST; the invoice is marked cancelled only after it persists, so a
+  failed accounting step never yields a "cancelled" invoice without its note (no false success —
+  returns 500 and leaves the invoice un-cancelled).
+- **Table/model:** `creditnotes` collection — `server/models/CreditNote.js`
+  (controller `server/controllers/invoiceController.js`).
+- **Link to invoice:** `CreditNote.orderId` → the Order that held the invoice, plus a snapshot of
+  `invoiceNo` / `invoiceDate` / `amount`; the order stores `creditNoteId` / `creditNoteNo`.
+  A **unique index on `orderId`** prevents duplicate credit notes (idempotent on repeat/raced calls).
+- **Numbering:** sequential `CN-000001` per organization (`nextCreditNoteNo`).
+- **Viewing:** Credit Notes listing at `/app/invoices/credit-notes`
+  (`GET /api/invoices/credit-notes`, org-scoped for non-Super-Admins), with PDF at
+  `/api/invoices/credit-notes/:id/pdf`.
+- **Activity log:** `INVOICE_CANCEL` is recorded with the credit-note number and reason.
+- **Roles:** cancellation is **Super-Admin-only** by design — route `allow(SUPER_ADMIN)` and the UI
+  button is gated to `SUPER_ADMIN` (`InvoiceGenerate.jsx`). Employee and Company Owner may generate,
+  edit and hold invoices but cannot cancel; this intentional difference is preserved. Credit notes
+  raised from an employee-created invoice still generate correctly when the Super Admin cancels.
+- **Conclusion:** the workflow generates, persists, links, numbers, logs and displays credit notes
+  correctly for the authorized role; **no fix required**. (If you later want Company Owners to cancel
+  their own org's invoices, that's a one-line route/permission change — tell me and I'll add it.)
+
+### Verification
+- `node --check` + ESM import OK; route introspection confirms `/masters/counts` precedes
+  `/masters/:key`; `vite build` OK.
+- Protected `OwnerLayout.jsx` / `MasterForm.jsx` and `server/package.json` unchanged.
+
+---
+
+## v46 — Standardized user dropdown (all roles) + credit note on order cancellation
+
+Two work areas. Existing credit-note process reused (no second implementation); permissions and
+numbering preserved; no schema changes. `MasterForm.jsx` and `server/package.json` untouched;
+`OwnerLayout.jsx` was changed intentionally for this request (the header-dropdown standardization).
+
+### #1 — Same user-name dropdown for Super Admin, Employee and Company Owner
+Root cause of the difference: Super Admin / Employee share the `/app` header (Topbar) which carried
+the dropdown, while the Company Owner `/owner` shell had its logout as a plain button in the sidebar
+footer and no header dropdown.
+- `client/src/components/layout/UserMenu.jsx` (new) — one reusable dropdown: avatar + name + role,
+  an optional items list (e.g. "Switch section"), and a **Log out** action. Outside-click close,
+  responsive (name row collapses into the menu on mobile).
+- `Topbar.jsx` (Super Admin / Employee) now renders `UserMenu` with Switch section + Log out.
+- `pages/owner/OwnerLayout.jsx` (Company Owner) gains a header bar with the **same** `UserMenu`
+  (Log out only); the duplicate sidebar-footer logout button was removed (the name stays).
+- Logout routes are preserved per role: Super Admin / Employee → `/login/employee`,
+  Company Owner → `/login/companyowner`; each clears its own token/session via the existing
+  `AuthContext.logout()` (which also calls the backend `/auth/logout`). Protected routes remain
+  guarded, so a logged-out user can't reach them without re-authenticating.
+
+### #2/#3/#4/#5 — Cancel Order now raises the credit note (shared service)
+Root cause of the inconsistency: credit-note creation lived **inline inside** `cancelInvoice`, so the
+**Cancel Order** action (`retailController.cancelOrder`) never produced one — cancelling an invoiced
+order left no credit note.
+- `server/services/creditNoteService.js` (new) — `ensureCreditNoteForOrder(order, { user, reason })`,
+  the single shared routine both flows now use. It validates the invoice exists, reuses the existing
+  `CreditNote` model + `nextCreditNoteNo` numbering + `netInvoiceAmount` figure, links the note to
+  the order/invoice, and is idempotent. Returns `{ status: 'no-invoice' | 'exists' | 'created' }`.
+- `controllers/invoiceController.js` — `cancelInvoice` refactored to call the shared service
+  (behaviour unchanged: Super-Admin-only, raises/links the note, no false success on failure).
+- `controllers/retailController.js` — `cancelOrder` now calls the shared service:
+  - **Scenario A (no invoice):** the existing rule still blocks cancelling a pre-invoice order
+    (those are edited/deleted); the service also returns `no-invoice` so no note is ever raised
+    without an invoice.
+  - **Scenario B (invoice exists):** the credit note is raised and linked, then the order is marked
+    cancelled in the same save. If the note fails, the order is **not** cancelled (no partial state).
+  - **Scenario C (repeat / already credited):** idempotent — the existing note is reused, never
+    duplicated; a second attempt on an already-cancelled order returns "already cancelled".
+- Duplicate prevention: the **unique index on `CreditNote.orderId`** is the hard guard (works on
+  standalone MongoDB and under concurrent submits); the create-note-then-save-order ordering keeps
+  state consistent. (Multi-document transactions require a MongoDB replica set; on a standalone
+  server the unique-index idempotency is the correct mechanism and is what's used.)
+- Activity Log: order cancellation logs `CANCEL` (Order); when a note is created it additionally logs
+  `INVOICE_CANCEL` with the credit-note number — only after the note is persisted, no duplicates.
+- `pages/retail/OrderDetail.jsx` + `OrderList.jsx` — the cancel confirmation now tells the user a
+  credit note will be raised against the invoice.
+
+### Roles (verified by code path)
+- **Cancel Invoice** stays **Super-Admin-only** (route `allow(SUPER_ADMIN)` + button gated).
+- **Cancel Order** keeps its existing permission (`can('retail-orders','EDIT')`), so whichever role
+  is already allowed to cancel an order now also triggers the shared credit-note rule. No new
+  cancellation rights were granted. Credit-note listing stays org-scoped (tenant isolation intact).
+
+### Verification
+- `node --check` + ESM import OK (service, `cancelInvoice`, `cancelOrder`); `vite build` OK.
+- `MasterForm.jsx` and `server/package.json` unchanged.
+- Runtime note: the end-to-end cancel → credit-note flow needs the live app/DB to exercise; the
+  shared service mirrors the already-working `cancelInvoice` logic and all static checks pass.
+
+---
+
+## v47 — Back button on inner pages, B2B order/invoice visibility, Society order cancel
+
+Three requirements. Existing credit-note service reused (no duplicate logic); permissions and tenant
+isolation preserved; no schema changes. `OwnerLayout.jsx` is the v46 header change; `MasterForm.jsx`
+and `server/package.json` remain untouched.
+
+### #1 — Consistent Back button on every inner page
+Implemented once in the shared `PageHeader` so it covers all roles/modules without editing each page.
+- `client/src/components/ui/index.jsx` — `PageHeader` now renders a Back button on **inner** pages,
+  detected by the last URL segment: a record id or an action word (`new` / `create` / `edit` /
+  `generate`). Add/Edit/View and detail pages (orders, invoices, customers, companies, employees,
+  services, packages, website items, master forms) get it; listing/section pages (last segment a
+  plain word like `orders`) don't. `back={false}` suppresses it; `back="/path"` forces it with an
+  explicit fallback.
+- Navigation: uses in-app history (`navigate(-1)`); when the page was opened directly/deep-linked
+  (React Router `location.key === 'default'`, i.e. no in-app history), it routes to the **parent**
+  path instead of leaving the app. It sits in the header next to the title, doesn't touch forms or
+  submit buttons, and the master-engine pages (which have their own Back) don't use `PageHeader`, so
+  there's no duplication.
+
+### #2 — B2B user now sees their company's orders + invoices
+Root cause: `b2bController.myOrders` filtered orders by `requestedByMemberId: req.user._id` only, so
+orders an Admin / Company Owner / employee created for the company (blank or different requesting
+member) were excluded — the member saw an empty list even though invoices existed.
+- `server/controllers/b2bController.js` — `myOrders` now scopes to the member's **company**
+  (`companyId: req.user.companyId`), which includes admin-created company orders while keeping tenant
+  isolation (never another company's orders); falls back to `requestedByMemberId` only if the member
+  has no company link. Invoice data already lives on each Order, so it comes through automatically.
+- `client/src/pages/portal/MemberPortal.jsx` — the "My orders" table now shows **Invoice** (number)
+  and **Status** (Pending / Invoiced / Invoice cancelled / Cancelled) columns.
+- No hardcoded ids; existing models/relationships reused.
+
+### #3 — Society (FIT) order listing: Cancel action + credit note
+The Society order list had only Delete. Added Cancel, reusing the **same** shared credit-note service.
+- `server/controllers/fitController.js` — new `cancelOrder`: requires a generated invoice, blocks a
+  repeat cancel, calls `ensureCreditNoteForOrder` (Scenario A no invoice → no note; B invoice → note
+  raised + linked; C repeat → idempotent, no duplicate), marks the order cancelled only after the
+  note persists, and logs `CANCEL` (Order) plus `INVOICE_CANCEL` when a note is created.
+- `server/routes/fitRoutes.js` — `PUT /api/fit/orders/:id/cancel`, gated by `can('fit-orders','EDIT')`
+  (backend-enforced, same permission model as retail cancel; no new rights granted).
+- `client/src/pages/fit/FitOrderList.jsx` — a **Cancel** action shown only when the order has an
+  invoice, isn't already cancelled, and the user has EDIT; confirmation popup; a Status column; and
+  Delete now hidden once invoiced/cancelled (mirrors the retail list).
+
+### Verification
+- `node --check` + ESM import OK; route introspection confirms `PUT /orders/:id/cancel`; `vite build` OK.
+- `MasterForm.jsx` and `server/package.json` unchanged.
+
+> Separate ops note (not a code issue): the login error `secretOrPrivateKey must have a value` means
+> `JWT_SECRET` isn't set in the server environment. Add `JWT_SECRET=<a long random string>` (and
+> `JWT_EXPIRES_IN=7d`) to `server/.env` — see `server/.env.example` — and restart the server. The code
+> already reads it correctly; it's purely a missing environment variable.

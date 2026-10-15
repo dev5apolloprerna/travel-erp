@@ -160,7 +160,7 @@ export default function InvoiceGenerate() {
     : order.module === 'FIT' ? `${base}/fit/orders` : `${base}/retail/orders`;
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-4xl">
       <PageHeader eyebrow={`${order.module === 'FIT' ? 'Society' : order.module} · ${order.orderNo}`}
         title={`Generate invoice — ${calc.serviceType}`} />
       {/* Sales vs Purchase direction (req #4) — a customer invoice is a SALES invoice. */}

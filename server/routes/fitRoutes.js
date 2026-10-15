@@ -48,5 +48,6 @@ r.delete('/passengers/:id', can('fit-doctors', 'DELETE'), pax.deletePassenger);
 r.get('/orders', c.listOrders);
 r.post('/orders', can('fit-orders', 'CREATE'), c.createOrder);
 r.get('/orders/:id', c.getOrder);
+r.put('/orders/:id/cancel', can('fit-orders', 'EDIT'), c.cancelOrder);   // req #3: cancel + credit note
 r.delete('/orders/:id', can('fit-orders', 'DELETE'), c.deleteOrder);
 export default r;
