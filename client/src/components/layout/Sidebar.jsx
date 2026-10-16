@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useArea } from '../../context/AreaContext';
-import { visibleMenu, availableAreas } from '../../menuConfig';
+import { visibleMenu, availableAreas, iconFor } from '../../menuConfig';
 import api from '../../api/client';
 
 const STORAGE_KEY = 'sidebarOpenSections';
 
-export default function Sidebar({ drawer = false, onClose }) {
+export default function Sidebar({ drawer = false, collapsed = false, onClose }) {
   const { user } = useAuth();
   const { pathname } = useLocation();
   const groups = visibleMenu(user);
@@ -56,17 +56,31 @@ export default function Sidebar({ drawer = false, onClose }) {
     ...(resolvedArea === 'master' ? masterSections : []),
   ];
 
+  // Flat list used by the collapsed icon rail (all visible items for the active area + Home).
+  const railItems = [
+    ...topLinks.flatMap((g) => g.items),
+    ...areaGroups.flatMap((g) => g.items),
+  ];
+
   const linkClass = ({ isActive }) =>
     `block rounded-lg px-[18px] py-2.5 text-[13.5px] transition ${
       isActive ? 'bg-brand-light font-bold text-brand-dark' : 'font-medium text-ink-soft hover:bg-faint'}`;
 
+  // Collapsed state is a DESKTOP concept only. On mobile the sidebar is always the full off-canvas
+  // drawer, so the icon-rail classes are all `md:` — the base (mobile) layout stays fully expanded.
   return (
-    <aside className={`fixed inset-y-0 left-0 z-40 flex h-screen w-[264px] min-w-[264px] flex-col border-r border-line bg-white transition-transform md:static md:translate-x-0 ${drawer ? 'translate-x-0' : '-translate-x-full'}`}>
-      <div className="flex items-center gap-2.5 border-b border-subtle px-[18px] pb-4 pt-5">
+    <aside className={`fixed inset-y-0 left-0 z-40 flex h-screen w-[264px] min-w-[264px] flex-col border-r border-line bg-white transition-all md:static md:translate-x-0 ${drawer ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'md:w-16 md:min-w-[64px]' : 'md:w-[264px] md:min-w-[264px]'}`}>
+      {/* Brand — full (mobile always; desktop when expanded) */}
+      <div className={`flex items-center gap-2.5 border-b border-subtle px-[18px] pb-4 pt-5 ${collapsed ? 'md:hidden' : ''}`}>
         <img src="/logo.png" alt="360 Travel Concierge" className="h-10 w-auto object-contain" />
       </div>
+      {/* Brand — compact (desktop collapsed only) */}
+      <div className={`hidden items-center justify-center border-b border-subtle py-4 ${collapsed ? 'md:flex' : ''}`}>
+        <img src="/logo.png" alt="360" className="h-8 w-8 rounded-md object-contain" />
+      </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 pb-6">
+      {/* Full menu — mobile always; desktop when expanded */}
+      <nav className={`flex-1 overflow-y-auto px-3 pb-6 ${collapsed ? 'md:hidden' : ''}`}>
         {topLinks.map((group, gi) => (
           <div key={`top${gi}`}>
             {group.items.map((it) => (
@@ -109,9 +123,23 @@ export default function Sidebar({ drawer = false, onClose }) {
         </div>
       </nav>
 
-      <div className="flex items-center gap-2 border-t border-line px-4 py-3">
+      {/* Collapsed icon rail — desktop collapsed only. Icons with native tooltips (title) + aria-label;
+          active highlighting preserved; navigation works without a refresh (NavLink). */}
+      <nav className={`hidden flex-1 flex-col items-center gap-1 overflow-y-auto px-2 pb-6 pt-2 ${collapsed ? 'md:flex' : ''}`}>
+        {railItems.map((it) => (
+          <NavLink key={it.key} to={it.to} end={it.end} title={it.label} aria-label={it.label}
+            className={({ isActive }) =>
+              `grid h-10 w-10 place-items-center rounded-lg text-[18px] leading-none transition ${
+                isActive ? 'bg-brand-light text-brand-dark ring-1 ring-brand/30' : 'text-ink-soft hover:bg-faint'}`}>
+            <span aria-hidden="true">{iconFor(it.key)}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Footer — avatar always; the name text hides on the collapsed desktop rail */}
+      <div className={`flex items-center gap-2 border-t border-line px-4 py-3 ${collapsed ? 'md:justify-center md:px-2' : ''}`}>
         <Avatar user={user} />
-        <div className="min-w-0 text-xs text-ink-muted">
+        <div className={`min-w-0 text-xs text-ink-muted ${collapsed ? 'md:hidden' : ''}`}>
           Signed in as<br />
           <span className="block truncate font-semibold text-ink-soft">{user?.name}</span>
         </div>

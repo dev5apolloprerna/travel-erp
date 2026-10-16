@@ -13,7 +13,8 @@ r.post('/reset-password', c.resetPassword);
 
 // Authenticated (website-customer JWT)
 r.get('/profile', protectWebsiteCustomer, c.profile);
+r.put('/profile', protectWebsiteCustomer, c.updateProfile);          // v50 (Task 4)
 r.post('/change-password', protectWebsiteCustomer, c.changePassword);
-r.get('/wishlist', protectWebsiteCustomer, c.myWishlist);
+// v50 (Task 3): GET /api/public/customer/wishlist was removed on request.
 
 export default r;

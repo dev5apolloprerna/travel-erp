@@ -109,6 +109,25 @@ export const MENU = [
   },
 ];
 
+// Per-menu icon used by the collapsed (icon-only) sidebar rail — req (v50 Task 1). Kept as a lookup
+// so the MENU array above stays unchanged; unknown keys fall back to a neutral document glyph.
+const MENU_ICONS = {
+  dashboard: '🏠',
+  'retail-customers': '👤', 'retail-orders': '🧾',
+  'b2b-companies': '🏢',
+  'fit-dashboard': '📊', 'fit-doctors': '🧍', 'fit-employees': '👥', 'fit-orders': '🧾',
+  'cms-categories': '🗂️', 'cms-destinations': '📍', 'cms-packages': '🧳', 'cms-content': '💬',
+  'cms-banners': '🖼️', 'cms-videos': '🎬', 'cms-team': '👔', 'cms-travel-inspiration': '💡',
+  'cms-customize-trip': '✏️', 'cms-bookings': '🌐', 'cms-inquiries': '📩',
+  'admin-supplier-invoices': '📥', 'admin-credit-notes': '🧾', 'admin-settings': '🏷️',
+  'my-profile': '👤', 'change-password': '🔑',
+  'admin-company-owners': '👑', 'admin-services': '🧩', 'admin-employees': '👥',
+  'admin-main-companies': '🏢', 'admin-activity-logs': '📜', 'admin-company-masters': '🗂️',
+  'master-cluster': '🏷️', 'master-division': '🏷️', 'master-grade': '🏷️', 'master-department': '🏷️',
+  'hr-holidays': '📅', 'hr-leaves': '📝', 'hr-my-leave': '📝', 'hr-salary': '💰', 'hr-my-salary': '💰',
+};
+export const iconFor = (key) => MENU_ICONS[key] || '📄';
+
 // Menus every logged-in staff user can reach regardless of granted rights.
 const ALWAYS_ALLOWED = ['dashboard', 'my-profile', 'change-password', 'hr-my-leave', 'hr-my-salary'];
 // Menus a Company Owner may SEE (visibility only — backend action authorization is unchanged, so a

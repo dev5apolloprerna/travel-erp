@@ -37,6 +37,6 @@ r.post('/customize-trip', p.storeCustomizeTrip);
 r.get('/our-team', p.listOurTeamPublic);
 r.get('/banners', p.listBannersPublic);
 r.get('/video-gallery', p.listVideosPublic);
-r.post('/wishlist', p.storeWishlist);
+// v50 (Task 3): the public wishlist endpoint (POST /api/public/wishlist) was removed on request.
 
 export default r;

@@ -2200,3 +2200,124 @@ The Society order list had only Delete. Added Cancel, reusing the **same** share
 > `JWT_SECRET` isn't set in the server environment. Add `JWT_SECRET=<a long random string>` (and
 > `JWT_EXPIRES_IN=7d`) to `server/.env` — see `server/.env.example` — and restart the server. The code
 > already reads it correctly; it's purely a missing environment variable.
+
+---
+
+## v48 — Hide/Show (collapse/expand) sidebar
+
+Frontend-only. Implemented centrally in the shared layouts — no new sidebar, no role-permission or
+route changes. Only the two shells that have a sidebar are affected; the B2B/customer portals have no
+sidebar and are untouched. `MasterForm.jsx` and `server/package.json` unchanged.
+
+### What was added
+- A **desktop collapse** toggle in the header (panel-collapse icon) that **hides** the sidebar and lets
+  the main content take the full width; clicking again **shows** it. Accessible: `aria-label` /
+  `title` switch between "Hide sidebar" and "Show sidebar", `aria-pressed` reflects state, visible
+  focus ring, keyboard-operable. Smooth via the existing `transition` classes.
+- The **mobile drawer** behaviour is unchanged and kept on a **separate** state, so the desktop
+  collapsed state and the mobile open/close never conflict (the toggle is desktop-only `md:` ;
+  the hamburger stays mobile-only).
+- **Persistence:** the preference is saved to `localStorage` under `sidebarCollapsed` and restored on
+  load, shared across both shells and across page navigation. Wrapped in try/catch (no crash in
+  private mode); nothing sensitive stored.
+
+### Files modified
+- `client/src/components/layout/AppLayout.jsx` — owns the `collapsed` state + `localStorage`
+  persistence (Super Admin / Employee), passes it to the sidebar and header.
+- `client/src/components/layout/Sidebar.jsx` — accepts `collapsed`; adds `md:hidden` when collapsed
+  so the sidebar hides on desktop and the `flex-1` main content auto-expands (no fixed-width math,
+  no horizontal overflow).
+- `client/src/components/layout/Topbar.jsx` — the desktop collapse/expand toggle button.
+- `client/src/pages/owner/OwnerLayout.jsx` — the same toggle + `collapsed` behaviour for the Company
+  Owner shell, sharing the same `sidebarCollapsed` key.
+
+### Behaviour notes
+- Collapse = hide/show (not an icon-only rail), because the existing menu items are text labels with
+  no per-item icons; this matches the "Hide Sidebar / Show Sidebar" intent and the current design,
+  and keeps active-menu highlighting, the section selector and submenus fully intact when shown.
+- Roles: Super Admin, Employee and Company Owner (the shells with sidebars) all get it via the shared
+  layouts; menu visibility, permissions, routes and authorization are unchanged.
+
+### Verification
+- `vite build` OK. Main content resizes via flexbox (collapsed → full width; expanded → 264px rail);
+  no horizontal overflow; dropdowns/modals/tables unaffected. `MasterForm.jsx` /
+  `server/package.json` unchanged.
+
+---
+
+## v49 — Fix: clear "Expand sidebar" affordance when collapsed
+
+Follow-up to v48. Root cause: the collapse/expand toggle already lived in the always-visible header
+and worked without a refresh, but it rendered the **same icon in both states** — only the tooltip
+changed — so once collapsed there was no obvious *Expand* cue; it read as "missing".
+Fix (icon only, no behaviour/layout change): the toggle icon is now **state-aware**.
+- Collapsed → an unmistakable **expand/menu** icon (three lines + a right chevron), tooltip/label
+  "Show sidebar".
+- Expanded → a **collapse** icon (sidebar panel + a left chevron), tooltip/label "Hide sidebar".
+The button stays in the header on every page/role, remains keyboard-accessible with a focus ring and
+`aria-pressed`, toggles instantly via React state, and the `localStorage` persistence is unchanged.
+- Files: `client/src/components/layout/Topbar.jsx` (Super Admin / Employee) and
+  `client/src/pages/owner/OwnerLayout.jsx` (Company Owner). `vite build` OK.
+
+---
+
+## v50 — Icon-rail sidebar, upgraded public booking API, wishlist removal, profile-update API, docs
+
+Six tasks. Existing architecture/conventions reused; MongoDB (no SQL migrations); protected
+`MasterForm.jsx` and `server/package.json` unchanged.
+
+### Task 1 — Proper collapsed (icon-rail) sidebar (replaces hide/show)
+Root cause of the old behaviour: collapse simply hid the sidebar (`md:hidden`) because menu items had
+no icons. v50 adds per-item icons and a real rail.
+- `client/src/menuConfig.js` — `iconFor(key)` lookup (one map; MENU array untouched).
+- `client/src/components/layout/Sidebar.jsx` (Super Admin / Employee) and
+  `client/src/pages/owner/OwnerLayout.jsx` (Company Owner): collapsed now renders a **64px icon rail**
+  — icons only, menu text hidden, **native tooltips (`title`) + `aria-label`** showing the menu name,
+  active highlight preserved, navigation via `NavLink` (no refresh). Expanded restores the full width,
+  labels and grouped/sub-menus. `flex-1` main content auto-adjusts (64px ↔ 264px); no overflow.
+- Collapsed is **desktop-only** (`md:` classes); mobile keeps the full off-canvas drawer. State still
+  persists in `localStorage` (`sidebarCollapsed`). B2B/customer portals have no sidebar.
+
+### Task 2 — `POST /api/public/bookings` upgraded
+- Customer identification (`server/controllers/websiteBookingController.js`): `websitecustomer_id`
+  supplied → must exist (else 400, no silent create); otherwise find by **email** (case-insensitive)
+  and reuse, else **create** a new `websitecustomers` record (name/email/mobile/address…). Duplicate
+  creation is prevented by the unique email index (concurrent race resolves to the winner).
+- Security: new accounts get a **secure random password** + a 7-day **account-setup token**; the
+  welcome email sends a **setup link** (`/reset-password?token=…`) + login URL — never a reusable
+  plaintext password (per the task's security preference; documented in the integration guide).
+- Welcome email sent **only** for genuinely new customers, **after** the booking saves, best-effort
+  (mail failure never rolls back); retries reuse the customer and send no duplicate email.
+- Structured `passengers` (firstName/lastName/dob/gender/nationality/passportNumber; snake_case
+  aliases accepted); validation for email, mobile, counts, travel date, and passenger rows.
+- Booking stores the resolved `websitecustomer_id`. Response adds `customerId`, `customerCreated`,
+  `customerEmailSent`. Models: `WebsiteBooking.websitecustomer_id` + structured `passengers`;
+  `WebsiteCustomer` gains address/city/state/country (+ in `toPublic`).
+- **`pending` field (req 2.6):** added to `WebsiteBooking`, **default `null`** (reserved
+  booking-workflow flag; no behaviour attached beyond storage; existing docs read as null; Mongo =
+  no migration).
+
+### Task 3 — Public wishlist API removed
+- Removed `POST /api/public/wishlist` (route + `publicController.storeWishlist`) and
+  `GET /api/public/customer/wishlist` (route + `websiteCustomerController.myWishlist`), and the now
+  unused `Wishlist` imports. The `wishlists` model/collection is **kept** (no data deleted). Both
+  endpoints now return the standard not-found response; no public frontend in this repo referenced them.
+
+### Task 4 — Public customer profile-update API
+- `PUT /api/public/customer/profile` (auth; `websiteCustomerController.updateProfile`). Identity comes
+  from the token — a body id is never trusted, so a customer can update only their own record. Updates
+  only supplied fields (omitted fields preserved), validates name/email/mobile, enforces unique
+  email/mobile excluding self, never returns the hash.
+
+### Task 5 — Integration docs
+- `docs/PUBLIC_API_INTEGRATION.md` — base URL/env/CORS, booking API + passenger shape + customer
+  flow, registration/welcome email, login, profile-update, wishlist removal, DB/`pending` setup,
+  fetch examples (guest vs logged-in), and troubleshooting — all matching the implemented routes.
+
+### Verification
+- `node --check` + ESM import OK (models, booking/customer controllers, routes); route introspection
+  confirms `PUT /customer/profile` present and both wishlist routes gone; `vite build` OK.
+- Protected `MasterForm.jsx` / `server/package.json` unchanged.
+
+> Reminder: live email + customer login need `JWT_SECRET`, `CLIENT_URL` and SMTP set in the server
+> environment (see `docs/PUBLIC_API_INTEGRATION.md`).

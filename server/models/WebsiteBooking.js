@@ -23,11 +23,18 @@ const websiteBookingSchema = new mongoose.Schema(
     state: { type: String, default: '' },
     country: { type: String, default: 'India' },
 
+    // The resolved website-customer account this booking belongs to (v50). Nullable: a guest booking
+    // whose customer couldn't be resolved still saves. Snake_case matches the public API field name.
+    websitecustomer_id: { type: mongoose.Schema.Types.ObjectId, ref: 'WebsiteCustomer', default: null, index: true },
+
     // Trip details
     travelDate: Date,
     adults: { type: Number, default: 1 },
     children: { type: Number, default: 0 },
-    passengers: { type: [String], default: [] },
+    // Structured passenger details (v50). Mixed keeps backward compatibility with older bookings that
+    // stored a plain string array; new bookings store objects with the fields below.
+    //   { firstName, lastName, dob, gender, nationality, passportNumber }
+    passengers: { type: [mongoose.Schema.Types.Mixed], default: [] },
     specialRequest: { type: String, default: '' },
 
     // Money
@@ -53,6 +60,12 @@ const websiteBookingSchema = new mongoose.Schema(
 
     status: { type: String, enum: ['NEW', 'CONFIRMED', 'CANCELLED'], default: 'NEW' },
     staffNotes: { type: String, default: '' },
+
+    // v50 (req 2.6): reserved booking-workflow flag. Default NULL (unset) — no behaviour is attached
+    // here beyond storage; it is set by whatever pending/approval workflow uses it. Existing records
+    // read as null. (MongoDB is schemaless, so no SQL migration is needed; adding this field is safe
+    // for existing documents.)
+    pending: { type: Boolean, default: null },
   },
   { timestamps: true }
 );

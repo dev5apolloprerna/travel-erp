@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import WebsiteCustomer from '../models/WebsiteCustomer.js';
-import Wishlist from '../models/Wishlist.js';
 import Settings from '../models/Settings.js';
 import { signWebsiteToken } from '../middleware/websiteAuth.js';
 import { sendMail } from '../utils/mailer.js';
@@ -145,10 +144,48 @@ export const changePassword = async (req, res) => {
   res.json({ message: 'Password changed successfully.' });
 };
 
-// GET /api/public/customer/wishlist   (auth) -> this customer's wishlist with package details
-export const myWishlist = async (req, res) => {
-  const rows = await Wishlist.find({ websitecustomer_id: req.websiteCustomer._id })
-    .populate('package_id', 'name slug price salePrice bannerImage')
-    .sort({ createdAt: -1 });
-  res.json(rows);
+// v50 (Task 4): update the signed-in customer's own profile. Identity comes from the auth token
+// (req.websiteCustomer) — a customer id in the body is never trusted. Only the supplied fields are
+// changed (unspecified fields are preserved). Email/mobile uniqueness is enforced excluding self.
+export const updateProfile = async (req, res) => {
+  const me = req.websiteCustomer;
+  const b = req.body || {};
+
+  // Only update fields that were actually supplied (don't null-out omitted fields — req 4.3).
+  const patch = {};
+  if (b.name !== undefined) {
+    if (!String(b.name).trim()) return res.status(400).json({ message: 'Name cannot be empty.' });
+    patch.name = String(b.name).trim();
+  }
+  if (b.email !== undefined) {
+    const email = normEmail(b.email);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ message: 'A valid email is required.' });
+    if (email !== me.email) {
+      const clash = await WebsiteCustomer.findOne({ email, _id: { $ne: me._id } });
+      if (clash) return res.status(409).json({ message: 'That email is already in use.' });
+      patch.email = email;   // auth is by token, so changing the email does not break the session
+    }
+  }
+  if (b.mobile !== undefined) {
+    const mobile = String(b.mobile).trim();
+    if (mobile && !/^[+\d][\d\s-]{6,15}$/.test(mobile)) return res.status(400).json({ message: 'Please enter a valid mobile number.' });
+    if (mobile && mobile !== me.mobile) {
+      const clash = await WebsiteCustomer.findOne({ mobile, _id: { $ne: me._id } });
+      if (clash) return res.status(409).json({ message: 'That mobile number is already in use.' });
+    }
+    patch.mobile = mobile;
+  }
+  for (const f of ['address', 'city', 'state', 'country']) {
+    if (b[f] !== undefined) patch[f] = String(b[f]).trim();
+  }
+
+  try {
+    Object.assign(me, patch);
+    await me.save();
+    await logActivity(req, { action: 'UPDATE', module: 'WebsiteAuth', recordId: me._id, recordLabel: me.email, message: 'Website customer profile updated' });
+    res.json({ message: 'Profile updated.', customer: me.toPublic() });
+  } catch (err) {
+    if (err?.code === 11000) return res.status(409).json({ message: 'That email or mobile is already in use.' });
+    res.status(500).json({ message: 'Could not update the profile. Please try again.' });
+  }
 };
