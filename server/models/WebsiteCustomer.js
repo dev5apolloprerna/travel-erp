@@ -10,7 +10,13 @@ const websiteCustomerSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
     passwordHash: { type: String, required: true },
 
-    // Password reset
+    // Address (captured on booking-created accounts and editable via the profile API) — v50.
+    address: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    country: { type: String, default: '' },
+
+    // Password reset / account-setup
     resetToken: { type: String, default: null },
     resetExpires: { type: Date, default: null },
 
@@ -28,7 +34,11 @@ websiteCustomerSchema.methods.comparePassword = function (plain) {
 
 // Never expose the hash / reset fields.
 websiteCustomerSchema.methods.toPublic = function () {
-  return { id: this._id, name: this.name, mobile: this.mobile, email: this.email, isActive: this.isActive, createdAt: this.createdAt };
+  return {
+    id: this._id, name: this.name, mobile: this.mobile, email: this.email,
+    address: this.address, city: this.city, state: this.state, country: this.country,
+    isActive: this.isActive, createdAt: this.createdAt,
+  };
 };
 
 export default mongoose.model('WebsiteCustomer', websiteCustomerSchema);

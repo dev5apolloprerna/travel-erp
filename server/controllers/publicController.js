@@ -6,7 +6,6 @@ import FrontInquiry from '../models/FrontInquiry.js';
 import TravelInspiration from '../models/TravelInspiration.js';
 import CustomizeTrip from '../models/CustomizeTrip.js';
 import OurTeam from '../models/OurTeam.js';
-import Wishlist from '../models/Wishlist.js';
 import Banner from '../models/Banner.js';
 import VideoGallery from '../models/VideoGallery.js';
 import { sendMail } from '../utils/mailer.js';
@@ -355,18 +354,5 @@ export const listOurTeamPublic = async (req, res) => {
   })));
 };
 
-// POST /api/public/wishlist   body: { websitecustomer_id, package_id }
-export const storeWishlist = async (req, res) => {
-  const { websitecustomer_id, package_id } = req.body || {};
-  if (!websitecustomer_id || !package_id)
-    return res.status(400).json({ message: 'websitecustomer_id and package_id are required.' });
-  try {
-    const existing = await Wishlist.findOne({ websitecustomer_id, package_id });
-    if (existing) return res.status(200).json({ message: 'Already in wishlist.', id: existing._id, duplicate: true });
-    const row = await Wishlist.create({ websitecustomer_id, package_id });
-    res.status(201).json({ message: 'Added to wishlist.', id: row._id });
-  } catch (err) {
-    if (err?.code === 11000) return res.status(200).json({ message: 'Already in wishlist.', duplicate: true });
-    res.status(400).json({ message: 'Could not add to wishlist.' });
-  }
-};
+// v50 (Task 3): storeWishlist (POST /api/public/wishlist) was removed on request. The Wishlist
+// model/collection is intentionally kept so existing data and any internal use remain intact.

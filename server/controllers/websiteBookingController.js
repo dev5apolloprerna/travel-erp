@@ -1,4 +1,6 @@
+import crypto from 'crypto';
 import WebsiteBooking from '../models/WebsiteBooking.js';
+import WebsiteCustomer from '../models/WebsiteCustomer.js';
 import TourPackage from '../models/TourPackage.js';
 import Customer from '../models/Customer.js';
 import Order from '../models/Order.js';
@@ -11,6 +13,60 @@ import {
 import { sendMail } from '../utils/mailer.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const normEmail = (e) => (e || '').trim().toLowerCase();
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Normalise one passenger (req 2.1) — accept both the documented field names and camelCase aliases.
+const normPassenger = (p) => {
+  if (!p || typeof p !== 'object') return null;
+  const out = {
+    firstName: (p.firstName ?? p.first_name ?? '').toString().trim(),
+    lastName: (p.lastName ?? p.last_name ?? '').toString().trim(),
+    dob: (p.dob ?? p.dateOfBirth ?? p.date_of_birth ?? '').toString().trim(),
+    gender: (p.gender ?? '').toString().trim(),
+    nationality: (p.nationality ?? '').toString().trim(),
+    passportNumber: (p.passportNumber ?? p.passport_number ?? p.passportNo ?? '').toString().trim(),
+  };
+  return (out.firstName || out.lastName) ? out : null;   // skip empty rows
+};
+
+/**
+ * Resolve the website customer for a booking (req 2.2). Returns { customer, created, setupToken }.
+ *  - Case A: a websitecustomer_id is supplied -> must exist, else a validation error (never silently
+ *    create another). Returns { error } so the caller can respond 400.
+ *  - Case B: no id -> find by email (case-insensitive) and reuse; otherwise create a new customer
+ *    with a secure RANDOM password + an account-setup token (we never email a reusable plaintext
+ *    password — req 2.3 security preference). The unique email index prevents duplicates under
+ *    concurrent requests; a duplicate-key race resolves to the existing customer.
+ */
+const resolveWebsiteCustomer = async ({ websitecustomer_id, customerName, email, customerMobile, address, city, state, country }) => {
+  if (websitecustomer_id) {
+    const existing = await WebsiteCustomer.findById(websitecustomer_id).catch(() => null);
+    if (!existing) return { error: 'The supplied customer account was not found.' };
+    return { customer: existing, created: false };
+  }
+
+  const found = await WebsiteCustomer.findOne({ email });   // email is stored lowercased -> case-insensitive
+  if (found) return { customer: found, created: false };
+
+  const setupToken = crypto.randomBytes(24).toString('hex');
+  const customer = new WebsiteCustomer({
+    name: customerName, email, mobile: customerMobile || '',
+    address: address || '', city: city || '', state: state || '', country: country || '',
+    resetToken: setupToken, resetExpires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),   // 7-day setup window
+  });
+  await customer.setPassword(crypto.randomBytes(18).toString('base64url'));   // secure random; never emailed
+  try {
+    await customer.save();
+    return { customer, created: true, setupToken };
+  } catch (err) {
+    if (err?.code === 11000) {   // concurrent create -> reuse the winner, no duplicate, no email
+      const race = await WebsiteCustomer.findOne({ email });
+      if (race) return { customer: race, created: false };
+    }
+    throw err;
+  }
+};
 
 /**
  * Website bookings.
@@ -26,29 +82,52 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
  */
 export const createBooking = async (req, res) => {
   const {
-    packageId, customerName, customerEmail, customerMobile,
+    packageId, customerName, customerMobile,
     address, city, state, country, travelDate,
     adults = 1, children = 0, passengers = [], specialRequest,
+    websitecustomer_id = null,
   } = req.body;
+  const customerEmail = normEmail(req.body?.customerEmail);
 
+  // ---- Validation (req 2.1) -------------------------------------------------
   if (!packageId) return res.status(400).json({ message: 'Please choose a package.' });
-  if (!customerName || !customerEmail) {
-    return res.status(400).json({ message: 'Name and email are required to book.' });
+  if (!customerName || !customerEmail) return res.status(400).json({ message: 'Name and email are required to book.' });
+  if (!EMAIL_RE.test(customerEmail)) return res.status(400).json({ message: 'A valid email address is required.' });
+  if (customerMobile && !/^[+\d][\d\s-]{6,15}$/.test(String(customerMobile))) {
+    return res.status(400).json({ message: 'Please enter a valid mobile number.' });
   }
+  const nAdults = Math.max(1, Number(adults) || 1);
+  const nChildren = Math.max(0, Number(children) || 0);
+  if (!Number.isFinite(nAdults) || !Number.isFinite(nChildren)) {
+    return res.status(400).json({ message: 'Passenger counts must be numbers.' });
+  }
+  if (travelDate && Number.isNaN(Date.parse(travelDate))) {
+    return res.status(400).json({ message: 'Please provide a valid travel date.' });
+  }
+  const paxList = (Array.isArray(passengers) ? passengers : []).map(normPassenger).filter(Boolean);
 
-  const pkg = await TourPackage.findById(packageId);
+  const pkg = await TourPackage.findById(packageId).catch(() => null);
   if (!pkg || !pkg.isActive) return res.status(404).json({ message: 'That package is not available.' });
+
+  // ---- Resolve / create the website customer (req 2.2 / 2.3) ----------------
+  let resolved;
+  try {
+    resolved = await resolveWebsiteCustomer({ websitecustomer_id, customerName, email: customerEmail, customerMobile, address, city, state, country });
+  } catch {
+    return res.status(500).json({ message: 'Could not process the customer account. Please try again.' });
+  }
+  if (resolved.error) return res.status(400).json({ message: resolved.error });
+  const { customer, created, setupToken } = resolved;
 
   const settings = await Settings.getSettings();
 
   // Price is taken from the package on the server — never trusted from the browser.
   const perPerson = pkg.discountPrice > 0 ? pkg.discountPrice : pkg.price;
-  const payingPax = Math.max(1, Number(adults) || 1) + Math.max(0, Number(children) || 0);
+  const payingPax = nAdults + nChildren;
   const subTotal = round2(perPerson * payingPax);
   const gstPercent = Number(pkg.gstPercent) || 0;
   const gstAmount = round2((subTotal * gstPercent) / 100);
   const totalAmount = round2(subTotal + gstAmount);
-
   const currency = pkg.type === 'INTERNATIONAL'
     ? (pkg.currency || settings.currencyInternational || 'USD')
     : (pkg.currency || settings.currencyDomestic || 'INR');
@@ -57,12 +136,12 @@ export const createBooking = async (req, res) => {
     packageId: pkg._id,
     packageName: pkg.name,
     packageType: pkg.type,
+    websitecustomer_id: customer?._id || null,
     customerName, customerEmail, customerMobile,
     address, city, state, country: country || 'India',
     travelDate: travelDate || undefined,
-    adults: Number(adults) || 1,
-    children: Number(children) || 0,
-    passengers: Array.isArray(passengers) ? passengers.filter(Boolean) : [],
+    adults: nAdults, children: nChildren,
+    passengers: paxList,
     specialRequest,
     pricePerPerson: perPerson,
     subTotal, gstPercent, gstAmount, totalAmount, currency,
@@ -73,18 +152,46 @@ export const createBooking = async (req, res) => {
   if (!payment.ok) {
     booking.paymentError = payment.error;
     await booking.save();
-    return res.status(400).json({ message: payment.error, bookingNo: booking.bookingNo });
+    return res.status(400).json({ message: payment.error, bookingNo: booking.bookingNo, customerId: customer?._id, customerCreated: created });
   }
 
   booking.gatewayOrderId = payment.orderId;
   await booking.save();
+
+  // Welcome / account-setup email — ONLY for a genuinely new customer, after the booking is saved
+  // (req 2.4). Best-effort: a mail failure never rolls back the customer/booking. No reusable
+  // plaintext password is sent — a secure setup link is used instead.
+  let customerEmailSent = false;
+  if (created) {
+    try {
+      const base = process.env.CLIENT_URL ? String(process.env.CLIENT_URL).split(',')[0] : '';
+      const loginUrl = base ? `${base}/login` : '';
+      const setupUrl = base && setupToken ? `${base}/reset-password?token=${setupToken}` : '';
+      const r = await sendMail({
+        to: customerEmail,
+        subject: `Welcome to ${settings.companyName || 'our travel site'}`,
+        html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#15223b">
+          <p>Hi ${customerName},</p>
+          <p>Thanks for booking <b>${pkg.name}</b> with us — your account has been created.</p>
+          ${setupUrl ? `<p>Set your password to access your account (link valid 7 days):<br/><a href="${setupUrl}">${setupUrl}</a></p>` : ''}
+          ${loginUrl ? `<p>You can sign in any time at <a href="${loginUrl}">${loginUrl}</a>.</p>` : ''}
+          <p>Booking reference: <b>${booking.bookingNo}</b></p>
+          <p>Happy travels,<br/>${settings.companyName || ''}</p></div>`,
+      });
+      customerEmailSent = !!r.sent;
+      if (!r.sent) console.error('[public/bookings] welcome email NOT sent to', customerEmail, '-', r.error);
+    } catch { /* ignore mail errors */ }
+  }
 
   res.status(201).json({
     bookingNo: booking.bookingNo,
     bookingId: booking._id,
     amount: booking.totalAmount,
     currency: booking.currency,
-    payment,          // everything the website checkout needs
+    customerId: customer?._id || null,
+    customerCreated: created,          // true only when a new website customer was created
+    customerEmailSent,                 // welcome email outcome (new customers only)
+    payment,                           // everything the website checkout needs
   });
 };
 
