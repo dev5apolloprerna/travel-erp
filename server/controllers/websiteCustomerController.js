@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import WebsiteCustomer from '../models/WebsiteCustomer.js';
+import Wishlist from '../models/Wishlist.js';
+import WebsiteBooking from '../models/WebsiteBooking.js';
 import Settings from '../models/Settings.js';
 import { signWebsiteToken } from '../middleware/websiteAuth.js';
 import { sendMail } from '../utils/mailer.js';
@@ -188,4 +190,82 @@ export const updateProfile = async (req, res) => {
     if (err?.code === 11000) return res.status(409).json({ message: 'That email or mobile is already in use.' });
     res.status(500).json({ message: 'Could not update the profile. Please try again.' });
   }
+};
+
+// POST /api/public/customer/logout   (auth)
+// The customer token is a stateless JWT, so sign-out is completed client-side by discarding the
+// token (there is no server-side session to destroy). This endpoint acknowledges the logout and
+// records it in the activity log; it does not blacklist the token.
+export const logout = async (req, res) => {
+  await logActivity(req, {
+    action: 'LOGOUT', module: 'WebsiteAuth', recordId: req.websiteCustomer._id,
+    recordLabel: req.websiteCustomer.email, message: 'Website customer signed out',
+  });
+  res.json({ message: 'Logged out. Please discard your access token.' });
+};
+
+// GET /api/public/customer/bookings            (auth) -> all of this customer's bookings, grouped
+// GET /api/public/customer/bookings/:type      (auth) -> one list; type can also be ?type=
+//   types: pending | paid | failed | cancelled | upcoming | completed | all
+// Grouping rules (documented assumptions):
+//   pending   = paymentStatus PENDING and not cancelled
+//   paid      = paymentStatus PAID (includes a later-cancelled booking that was paid)
+//   failed    = paymentStatus FAILED
+//   cancelled = booking status CANCELLED
+//   upcoming  = paid, not cancelled, travelDate today-or-later
+//   completed = paid, not cancelled, travelDate in the past
+export const myBookings = async (req, res) => {
+  const now = new Date();
+  const rows = await WebsiteBooking.find({ websitecustomer_id: req.websiteCustomer._id })
+    .populate('packageId', 'name slug bannerImage')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const isCancelled = (b) => b.status === 'CANCELLED';
+  const isPaid = (b) => b.paymentStatus === 'PAID';
+  const travel = (b) => (b.travelDate ? new Date(b.travelDate) : null);
+
+  const groups = {
+    pending:   rows.filter((b) => b.paymentStatus === 'PENDING' && !isCancelled(b)),
+    paid:      rows.filter((b) => isPaid(b)),
+    failed:    rows.filter((b) => b.paymentStatus === 'FAILED'),
+    cancelled: rows.filter(isCancelled),
+    upcoming:  rows.filter((b) => isPaid(b) && !isCancelled(b) && travel(b) && travel(b) >= now),
+    completed: rows.filter((b) => isPaid(b) && !isCancelled(b) && travel(b) && travel(b) < now),
+  };
+
+  const type = String(req.params.type || req.query.type || '').toLowerCase();
+  if (type && type !== 'all') {
+    if (!(type in groups)) return res.status(400).json({ message: 'Unknown booking type.' });
+    return res.json({ type, count: groups[type].length, bookings: groups[type] });
+  }
+
+  res.json({
+    counts: Object.fromEntries(Object.entries(groups).map(([k, v]) => [k, v.length])),
+    ...groups,
+  });
+};
+
+// GET /api/public/customer/wishlist   (auth) -> this customer's wishlist with package details
+export const myWishlist = async (req, res) => {
+  const rows = await Wishlist.find({ websitecustomer_id: req.websiteCustomer._id })
+    .populate('package_id', 'name slug price salePrice bannerImage')
+    .sort({ createdAt: -1 });
+  res.json(rows);
+};
+
+// POST /api/public/customer/wishlist-delete   (auth)   body: { package_id } or { id }
+// Removes ONE wishlist record belonging to the signed-in customer. The customer is taken from the
+// auth token, so a customer can only delete their own wishlist entries (never another customer's).
+export const deleteWishlist = async (req, res) => {
+  const { package_id, id } = req.body || {};
+  if (!package_id && !id) return res.status(400).json({ message: 'package_id or id is required.' });
+
+  // Always scope by the authenticated customer so ownership can't be bypassed via the body.
+  const filter = { websitecustomer_id: req.websiteCustomer._id };
+  if (id) filter._id = id; else filter.package_id = package_id;
+
+  const result = await Wishlist.deleteOne(filter);
+  if (!result.deletedCount) return res.status(404).json({ message: 'Wishlist item not found.' });
+  res.json({ message: 'Removed from wishlist.', deleted: result.deletedCount });
 };

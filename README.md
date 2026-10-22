@@ -2321,3 +2321,92 @@ no icons. v50 adds per-item icons and a real rail.
 
 > Reminder: live email + customer login need `JWT_SECRET`, `CLIENT_URL` and SMTP set in the server
 > environment (see `docs/PUBLIC_API_INTEGRATION.md`).
+
+---
+
+## v51 — Wishlist APIs restored + delete endpoint + payment-fail endpoint
+
+Backend-only; `confirmPayment` and the rest of the payment flow are unchanged.
+- **Reverted the v50 Task-3 removal:** `POST /api/public/wishlist` (publicController.storeWishlist)
+  and `GET /api/public/customer/wishlist` (websiteCustomerController.myWishlist) are back exactly as
+  before, with their `Wishlist` imports restored.
+- **New** `POST /api/public/customer/wishlist-delete` (auth) — `deleteWishlist`: removes ONE wishlist
+  record for the **signed-in** customer. Body `{ package_id }` or `{ id }`; the customer is taken
+  from the auth token and the delete is always scoped to `websitecustomer_id = req.websiteCustomer._id`,
+  so a customer can only delete their own entries. `404` if not found.
+- **New** `POST /api/public/bookings/:id/fail` (public) — `markPaymentFailed`: records a failed /
+  user-cancelled payment so the booking status updates. Reviewed the supplied implementation — it's
+  correct: it only acts on a `PENDING` booking (never overwrites a `PAID` one), stores
+  `error/reason` (or a JSON blob with `code`/`gateway`/timestamp when provided), and is idempotent
+  (an already PAID/FAILED booking returns its current status). Wired as given.
+- Files: `server/controllers/publicController.js`, `server/controllers/websiteCustomerController.js`,
+  `server/controllers/websiteBookingController.js`, `server/routes/publicRoutes.js`,
+  `server/routes/websiteCustomerRoutes.js`; `docs/PUBLIC_API_INTEGRATION.md` updated.
+- Verified: `node --check` + ESM import OK; route introspection confirms `/wishlist`,
+  `/customer/wishlist`, `/customer/wishlist-delete`, and `/bookings/:id/fail` all present.
+
+---
+
+## v52 — Multiple structured passengers + admin booking display
+
+Small, focused change to the public booking + admin Website Bookings view.
+- `server/controllers/websiteBookingController.js` — the passenger normalizer now also accepts the
+  **`isLead`** flag (`is_lead` alias too) alongside firstName/lastName/dob/gender/nationality/
+  passportNumber. Multiple passengers in the `passengers` JSON array are each normalized and stored
+  (the WebsiteBooking `passengers` field is already a flexible array, so no model change). The lead
+  passenger is preserved. Existing validation and the rest of `createBooking` are unchanged.
+- `client/src/pages/cms/WebsiteBookings.jsx` (admin → Website Bookings → View) — replaced the old
+  `passengers.join(', ')` line (which rendered `[object Object]` for structured passengers) with a
+  **Passengers (n)** section that lists each passenger with their full name, a **Lead** badge, and a
+  meta line (gender · DOB · nationality · passport). Backward compatible: older bookings that stored
+  plain strings still render.
+- Verified: `node --check` OK; `vite build` OK.
+
+---
+
+## v53 — Website-customer logout + "My Trips" booking APIs (Node only)
+
+Backend-only; all under `/api/public/customer` and guarded by the website-customer token.
+- `POST /customer/logout` — acknowledges + logs the sign-out. The token is a stateless JWT, so the
+  frontend logs out by discarding the token (no server-side blacklist). `websiteCustomerController.logout`.
+- `GET /customer/bookings` — the signed-in customer's own bookings, grouped with counts:
+  `pending, paid, failed, cancelled, upcoming, completed`.
+- `GET /customer/bookings/:type` (or `?type=`) — one category (`pending|paid|failed|cancelled|upcoming|completed|all`);
+  returns `{ type, count, bookings }` with each booking's package populated.
+  `websiteCustomerController.myBookings`. All queries are scoped to `websitecustomer_id =
+  req.websiteCustomer._id`, so a customer sees only their own bookings.
+- Grouping rules (documented): pending = PENDING & not cancelled; paid = paymentStatus PAID;
+  failed = FAILED; cancelled = status CANCELLED; upcoming = paid & not cancelled & travelDate ≥ today;
+  completed = paid & not cancelled & travelDate in the past.
+- Files: `server/controllers/websiteCustomerController.js`, `server/routes/websiteCustomerRoutes.js`,
+  `docs/PUBLIC_API_INTEGRATION.md`. Verified: `node --check` + route introspection OK.
+
+---
+
+## v54 — Booking welcome email = login credentials; payment price hardening
+
+Backend-only. `createBooking` + payment confirmation.
+- **Welcome email now sends login credentials** (per request): a booking-created customer gets a
+  **generated initial password**, and the email contains **Login URL + Email + Password** (no
+  password-setup/reset link). The login URL comes from the new env var **`frontwebsite_url`** (the
+  sign-in page, e.g. `https://360-travel.vercel.app/sign-in`), falling back to `CLIENT_URL`. The
+  plaintext password is emailed once only — hashed in the DB, never stored/logged/returned. The email
+  asks the customer to change it after first login. Added `frontwebsite_url` to `.env.example`.
+- **Payment price can't be tampered with** (confirmation of existing design + one hardening):
+  prices are always computed **server-side from the package** in `createBooking` / `createPayment` —
+  the browser never supplies the amount. Razorpay payments are bound to the server-created order via
+  the signature. Added a **Stripe amount + currency check** in `confirmPayment`: the PaymentIntent's
+  `amount`/`currency` must equal the booking total, else the payment is marked FAILED and rejected —
+  blocking any attempt to pay a reduced/tampered amount. The working success/failure flow is otherwise
+  unchanged.
+- Files: `server/controllers/websiteBookingController.js`, `server/.env.example`,
+  `docs/PUBLIC_API_INTEGRATION.md`. Verified: `node --check` + ESM import OK.
+
+---
+
+## v55 — Welcome-email login URL uses `frontwebsite_url` only
+
+`createBooking` welcome email: `loginUrl` is now taken solely from `process.env.frontwebsite_url`
+(the `CLIENT_URL` fallback was removed, per request). Set `frontwebsite_url` in the server `.env`
+(e.g. `https://360-travel.vercel.app/sign-in`); if it's unset, the email simply omits the login link.
+File: `server/controllers/websiteBookingController.js`. `node --check` OK.

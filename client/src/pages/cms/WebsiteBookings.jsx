@@ -99,9 +99,33 @@ export default function WebsiteBookings() {
               <Row label="Type" value={detail.packageType} />
               <Row label="Travel date" value={detail.travelDate ? new Date(detail.travelDate).toLocaleDateString('en-IN') : '—'} />
               <Row label="Travellers" value={`${detail.adults} adult(s), ${detail.children} child(ren)`} />
-              {detail.passengers?.length > 0 && <Row label="Names" value={detail.passengers.join(', ')} />}
               {detail.specialRequest && <Row label="Special request" value={detail.specialRequest} />}
             </Section>
+
+            {detail.passengers?.length > 0 && (
+              <Section title={`Passengers (${detail.passengers.length})`}>
+                <div className="space-y-2">
+                  {detail.passengers.map((p, i) => {
+                    // Backward compatible: older bookings stored plain strings.
+                    if (typeof p === 'string') return <div key={i} className="rounded-lg bg-faint px-3 py-2">{p}</div>;
+                    const name = [p.firstName, p.lastName].filter(Boolean).join(' ') || `Passenger ${i + 1}`;
+                    const meta = [
+                      p.gender, p.dob ? `DOB ${p.dob}` : '', p.nationality,
+                      p.passportNumber ? `Passport ${p.passportNumber}` : '',
+                    ].filter(Boolean).join('  ·  ');
+                    return (
+                      <div key={i} className="rounded-lg bg-faint px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-ink">{name}</span>
+                          {p.isLead && <Badge status="PAID">Lead</Badge>}
+                        </div>
+                        <div className="mt-0.5 text-xs text-ink-muted">{meta || '—'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+            )}
 
             <Section title="Customer">
               <Row label="Name" value={detail.customerName} />

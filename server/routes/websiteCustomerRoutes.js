@@ -15,6 +15,10 @@ r.post('/reset-password', c.resetPassword);
 r.get('/profile', protectWebsiteCustomer, c.profile);
 r.put('/profile', protectWebsiteCustomer, c.updateProfile);          // v50 (Task 4)
 r.post('/change-password', protectWebsiteCustomer, c.changePassword);
-// v50 (Task 3): GET /api/public/customer/wishlist was removed on request.
+r.post('/logout', protectWebsiteCustomer, c.logout);                 // v53: sign out
+r.get('/bookings', protectWebsiteCustomer, c.myBookings);            // v53: grouped bookings
+r.get('/bookings/:type', protectWebsiteCustomer, c.myBookings);      // v53: one category
+r.get('/wishlist', protectWebsiteCustomer, c.myWishlist);            // v51: restored
+r.post('/wishlist-delete', protectWebsiteCustomer, c.deleteWishlist); // v51: remove one wishlist item
 
 export default r;

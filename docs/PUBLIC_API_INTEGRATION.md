@@ -130,10 +130,13 @@ hashes / stack traces are never returned.
 
 - The existing registration endpoint is `POST /api/public/customer/register`
   `{ name, email, mobile, password, conform_passwrd }` → `201 { message, token, customer, emailSent }`.
-- **Booking-created customers** (Case B above) are created **without** a user-chosen password. Instead
-  of emailing a reusable plaintext password, the welcome email contains a **secure account-setup
-  link** (`${CLIENT_URL}/reset-password?token=…`, valid 7 days) plus the login URL. The customer sets
-  their own password via that link, then logs in normally.
+- **Booking-created customers** (Case B above) are created with a **generated initial password**. The
+  welcome email contains the **login URL + email + password** so the customer can sign in immediately,
+  and asks them to change the password after first login. The login URL comes from the server env
+  `frontwebsite_url` (the sign-in page, e.g. `https://360-travel.vercel.app/sign-in`), falling back to
+  `CLIENT_URL`. The plaintext password is emailed once only — it is hashed in the DB and never stored,
+  logged, or returned by the API. (Security note: emailing an initial password is less secure than a
+  one-time setup link; customers should change it on first login.)
 - The welcome email is sent **only** for a genuinely new customer, **after** the booking is saved, and
   **best-effort**: a mail failure never rolls back the customer or booking. A retry with the same
   email reuses the existing customer and sends **no** second email.
@@ -180,14 +183,43 @@ own record); `401` missing/invalid token. Password hashes are never returned.
 
 ---
 
-## F. Wishlist API removal
+## E2. Customer logout & "My Trips" (v53)
 
-The public wishlist endpoints were **removed** in v50:
-- `POST /api/public/wishlist` — removed.
-- `GET /api/public/customer/wishlist` — removed.
+- `POST /api/public/customer/logout` **(auth)** — acknowledges sign-out and logs it. The token is a
+  stateless JWT, so the frontend completes logout by **discarding the token**; the server does not
+  blacklist it. Returns `{ message }`.
+- `GET /api/public/customer/bookings` **(auth)** — the signed-in customer's own bookings, grouped:
+  ```json
+  { "counts": { "pending":1, "paid":2, "failed":0, "cancelled":1, "upcoming":1, "completed":1 },
+    "pending": [...], "paid": [...], "failed": [...], "cancelled": [...], "upcoming": [...], "completed": [...] }
+  ```
+- `GET /api/public/customer/bookings/:type` **(auth)** (or `?type=`) — one list.
+  `type` = `pending | paid | failed | cancelled | upcoming | completed | all`. Returns
+  `{ type, count, bookings:[...] }`. Each booking has its package populated (`name`, `slug`,
+  `bannerImage`). **Grouping:** pending = PENDING & not cancelled; paid = paymentStatus PAID;
+  failed = FAILED; cancelled = status CANCELLED; upcoming = paid, not cancelled, travelDate ≥ today;
+  completed = paid, not cancelled, travelDate in the past.
 
-The frontend must **no longer call** these. They now return the server's standard not-found response.
-The `wishlists` collection/model is retained (no data deleted).
+## F. Wishlist API
+
+(The v50 removal was reverted in v51 — these endpoints are available.)
+
+- `POST /api/public/wishlist` — add to wishlist. Body `{ websitecustomer_id, package_id }`.
+  Returns `201 { message, id }`, or `200 { message, duplicate:true }` if already present.
+- `GET /api/public/customer/wishlist` — **(auth)** the signed-in customer's wishlist, with package
+  details populated.
+- `POST /api/public/customer/wishlist-delete` — **(auth)** remove ONE of the signed-in customer's
+  wishlist items. Body `{ package_id }` **or** `{ id }` (the wishlist row id). The customer is taken
+  from the token, so a customer can only delete their own entries. Returns `200 { message, deleted }`
+  or `404` if not found.
+
+## F2. Payment failure
+
+- `POST /api/public/bookings/:id/fail` — record a failed / user-cancelled payment. Body (all optional)
+  `{ error, reason, code, gateway }`. Only updates a booking that is still `PENDING` (never overwrites
+  a `PAID` booking); idempotent. Returns `{ message, bookingNo, status }`. Call this from the website
+  when the gateway reports failure or the user closes the checkout, so the booking doesn't stay
+  `PENDING`. (The success path — `POST /bookings/:id/confirm` — is unchanged.)
 
 ---
 
