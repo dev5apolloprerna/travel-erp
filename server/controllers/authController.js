@@ -4,7 +4,6 @@ import { scopeToOrg, ownsOrg } from '../middleware/auth.js';
 import { resolveOrgId } from '../utils/orgContext.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
 import Service from '../models/Service.js'; // Import Service model for populate
-import { logActivity } from '../utils/activityLog.js';
 
 const signToken = (user) =>
   jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
@@ -23,7 +22,6 @@ const publicUser = (u) => ({
   profilePic: u.profilePic || '',
   isActive: u.isActive,
   menus: u.menus || [],
-  permissions: u.permissions || {},   // req #9: per-menu action matrix
   modules: u.modules || [],
   services: u.services || [],
   customerId: u.customerId,
@@ -47,16 +45,7 @@ export const login = async (req, res) => {
   if (expectedRole && user.role !== expectedRole) {
     return res.status(403).json({ message: 'This login is not valid for this portal' });
   }
-  // req #1: record the login (no password/token stored). `user` is passed directly since protect
-  // middleware hasn't populated req.user on the login route.
-  await logActivity({ user }, { action: 'LOGIN', module: 'Auth', recordId: user._id, recordLabel: user.name, message: `${user.role} signed in` });
   res.json({ token: signToken(user), user: publicUser(user) });
-};
-
-// POST /api/auth/logout  (protected) — records the sign-out; the client clears its token.
-export const logout = async (req, res) => {
-  await logActivity(req, { action: 'LOGOUT', module: 'Auth', recordId: req.user?._id, recordLabel: req.user?.name, message: `${req.user?.role} signed out` });
-  res.json({ message: 'Signed out' });
 };
 
 export const me = async (req, res) => {
@@ -66,7 +55,7 @@ export const me = async (req, res) => {
 
 // ---- Employee management (menu-access controlled) ----
 export const createEmployee = async (req, res) => {
-  const { name, email, password, phone, employeeType, employeeTypes, menus, permissions, modules, services, isActive, hr } = req.body;
+  const { name, email, password, phone, employeeType, employeeTypes, menus, modules, services, isActive, hr } = req.body;
   const exists = await User.findOne({ email: email.toLowerCase() });
   if (exists) return res.status(400).json({ message: 'Email already in use' });
 
@@ -80,20 +69,17 @@ export const createEmployee = async (req, res) => {
     name, email, phone: phone || '', role: ROLES.EMPLOYEE, organizationId: orgId,
     employeeType: employeeType || (employeeTypes || [])[0] || null,
     employeeTypes: employeeTypes || (employeeType ? [employeeType] : []),
-    // req #9: `permissions` (the action matrix) is the source of truth; `menus` is derived from
-    // it on save. If only a legacy `menus` list is sent, it is still honoured.
-    menus: menus || [], permissions: permissions || {}, modules: modules || [], services: services || [],
+    menus: menus || [], modules: modules || [], services: services || [],
     isActive: isActive !== undefined ? isActive : true,
     hr: hr || {},
   });
   await user.setPassword(password || 'password123');
   await user.save();
-  await logActivity(req, { action: 'CREATE', module: 'Employee', recordId: user._id, recordLabel: user.name, message: 'Employee created' });
   res.status(201).json({ user: publicUser(user) });
 };
 
 export const updateEmployee = async (req, res) => {
-  const { name, email, phone, employeeType, employeeTypes, menus, permissions, modules, services, password, isActive, hr } = req.body;
+  const { name, email, phone, employeeType, employeeTypes, menus, modules, services, password, isActive, hr } = req.body;
   const user = await User.findById(req.params.id);
   if (!user || !ownsOrg(user, req)) return res.status(404).json({ message: 'Employee not found' });
 
@@ -104,13 +90,11 @@ export const updateEmployee = async (req, res) => {
   if (employeeType !== undefined) user.employeeType = employeeType;
   if (employeeTypes !== undefined) user.employeeTypes = employeeTypes;
   if (menus !== undefined) user.menus = menus;
-  if (permissions !== undefined) { user.permissions = permissions; user.markModified('permissions'); }  // req #9
   if (modules !== undefined) user.modules = modules;
   if (services !== undefined) user.services = services;
   if (isActive !== undefined) user.isActive = isActive;
   if (password) await user.setPassword(password);
   await user.save();
-  await logActivity(req, { action: 'UPDATE', module: 'Employee', recordId: user._id, recordLabel: user.name, message: password ? 'Employee updated (password changed)' : 'Employee / permissions updated' });
   res.json({ user: publicUser(user) });
 };
 
@@ -118,7 +102,6 @@ export const deleteEmployee = async (req, res) => {
   const emp = await User.findById(req.params.id);
   if (!emp || !ownsOrg(emp, req)) return res.status(404).json({ message: 'Employee not found' });
   await emp.deleteOne();
-  await logActivity(req, { action: 'DELETE', module: 'Employee', recordId: emp._id, recordLabel: emp.name, message: 'Employee deleted' });
   res.json({ message: 'Employee deleted' });
 };
 
@@ -175,7 +158,6 @@ export const createCompanyOwner = async (req, res) => {
   });
   await user.setPassword(password || 'owner123');
   await user.save();
-  await logActivity(req, { action: 'CREATE', module: 'CompanyOwner', recordId: user._id, recordLabel: user.name, message: 'Company Owner created' });
   res.status(201).json({ user: publicUser(user) });
 };
 
@@ -190,7 +172,6 @@ export const updateCompanyOwner = async (req, res) => {
   if (isActive !== undefined) user.isActive = isActive;
   if (password) await user.setPassword(password);
   await user.save();
-  await logActivity(req, { action: 'UPDATE', module: 'CompanyOwner', recordId: user._id, recordLabel: user.name, message: 'Company Owner updated' });
   res.json({ user: publicUser(user) });
 };
 
@@ -198,7 +179,6 @@ export const deleteCompanyOwner = async (req, res) => {
   const owner = await User.findOne({ _id: req.params.id, role: ROLES.COMPANY_OWNER });
   if (!owner) return res.status(404).json({ message: 'Company Owner not found' });
   await owner.deleteOne();
-  await logActivity(req, { action: 'DELETE', module: 'CompanyOwner', recordId: owner._id, recordLabel: owner.name, message: 'Company Owner deleted' });
   res.json({ message: 'Company Owner deleted' });
 };
 
@@ -247,11 +227,6 @@ export const resetUserPassword = async (req, res) => {
 
   await user.setPassword(newPassword);
   await user.save();
-  // Audit the admin password reset (req #5) — never log the password itself.
-  await logActivity(req, {
-    action: 'PASSWORD_RESET', module: 'Auth', recordId: user._id, recordLabel: user.name,
-    message: `Password reset for ${user.role} ${user.name} by ${req.user?.name || 'admin'}`,
-  });
   res.json({ message: `Password reset for ${user.name}` });
 };
 

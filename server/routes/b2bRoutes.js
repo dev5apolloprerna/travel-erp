@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as c from '../controllers/b2bController.js';
-import { protect, allow, can } from '../middleware/auth.js';
+import { protect, allow } from '../middleware/auth.js';
 import { ROLES } from '../models/User.js';
 import { upload, toFolder } from '../utils/upload.js';
 
@@ -10,10 +10,10 @@ const r = Router();
 const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER);
 
 r.get('/companies', protect, staff, c.listCompanies);
-r.post('/companies', protect, staff, can('b2b-companies', 'CREATE'), c.createCompany);
+r.post('/companies', protect, staff, c.createCompany);
 r.get('/companies/:id', protect, staff, c.getCompany);
-r.put('/companies/:id', protect, staff, can('b2b-companies', 'EDIT'), c.updateCompany);
-r.delete('/companies/:id', protect, staff, can('b2b-companies', 'DELETE'), c.deleteCompany);
+r.put('/companies/:id', protect, staff, c.updateCompany);
+r.delete('/companies/:id', protect, staff, c.deleteCompany);
 r.post('/companies/:id/members', protect, staff, c.addMember);
 r.put('/companies/:id/members/:memberId', protect, staff, c.updateMember);
 r.delete('/companies/:id/members/:memberId', protect, staff, c.deleteMember);
@@ -36,8 +36,6 @@ r.get('/companies/:id/members/:memberId', protect, staff, c.getMember);
 r.post('/companies/:id/members/:memberId/documents', protect, staff, toFolder('members'), upload.single('file'), c.addMemberDocument);
 r.delete('/companies/:id/members/:memberId/documents/:docId', protect, staff, c.deleteMemberDocument);
 
-// req: B2B order creation respects the Orders permission ('retail-orders' — the app's only Orders
-// key). Blocks a direct POST even when the Book button is hidden.
-r.post('/orders', protect, staff, can('retail-orders', 'CREATE'), c.createOrder);
+r.post('/orders', protect, staff, c.createOrder);
 r.get('/my-orders', protect, allow(ROLES.B2B_MEMBER), c.myOrders);
 export default r;

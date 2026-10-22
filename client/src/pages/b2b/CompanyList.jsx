@@ -1,19 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
-import { useAuth } from '../../context/AuthContext';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Table, EmptyRow, RowActions, money } from '../../components/ui';
 import { useShellBase } from '../../hooks/useShellBase';
 
-// Booking a B2B order respects the Orders permission ('retail-orders' is this app's only
-// Orders menu/permission key — there is no separate B2B-orders key), applied the same way as
-// on the Retail Customer listing so both screens behave consistently.
-const ORDER_MENU = 'retail-orders';
-
 export default function CompanyList() {
-  const { can } = useAuth();
-  const canBookOrder = can(ORDER_MENU, 'CREATE');
   const [companies, setCompanies] = useState([]);
   const nav = useNavigate();
   const confirm = useConfirm();
@@ -32,7 +24,7 @@ export default function CompanyList() {
       <PageHeader eyebrow="B2B" title="Companies"
         actions={
           <div className="flex gap-2">
-            {canBookOrder && <Link to={`${base}/b2b/orders/new`} className="btn-accent">New booking</Link>}
+            <Link to={`${base}/b2b/orders/new`} className="btn-accent">New booking</Link>
             <Link to={`${base}/b2b/companies/new`} className="btn-primary">New company</Link>
           </div>
         } />
@@ -51,7 +43,7 @@ export default function CompanyList() {
                 onDelete={() => del(c)}
                 extra={
                   <>
-                    {canBookOrder && <button onClick={() => nav(`${base}/b2b/orders/new?company=${c._id}`)} className="btn-ghost btn-sm">Book</button>}
+                    <button onClick={() => nav(`${base}/b2b/orders/new?company=${c._id}`)} className="btn-ghost btn-sm">Book</button>
                     <button onClick={() => nav(`${base}/b2b/companies/${c._id}`)} className="btn-primary btn-sm">Open</button>
                   </>
                 }

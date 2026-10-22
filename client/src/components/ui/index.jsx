@@ -1,44 +1,11 @@
 // Small shared UI primitives used across all modules.
-import { useNavigate, useLocation } from 'react-router-dom';
 
-// Inner pages (Add / Edit / View / detail) get an automatic, consistent Back button (req #1).
-// A page counts as "inner" when its last path segment is a record id or an action word
-// (new/create/edit/generate) — covering detail and form pages across every role without editing
-// each file. Listing / section pages (last segment a plain word like "orders") get none, and pages
-// that already render their own back control (the master-engine pages) don't use PageHeader, so
-// there's no duplication. Pass `back={false}` to suppress, or `back="/path"` to force it with an
-// explicit fallback target.
-const INNER_LAST = new Set(['new', 'create', 'edit', 'generate']);
-const looksLikeId = (seg) => /^[0-9a-f]{24}$/i.test(seg) || /^\d+$/.test(seg);
-
-export function PageHeader({ eyebrow, title, actions, back }) {
-  const nav = useNavigate();
-  const loc = useLocation();
-  const segs = loc.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
-  const last = segs[segs.length - 1] || '';
-  const auto = INNER_LAST.has(last) || looksLikeId(last);
-  const show = back === false ? false : (back ? true : auto);
-  const fallback = typeof back === 'string' ? back : '/' + segs.slice(0, -1).join('/');
-
-  // Prefer in-app history; a 'default' location key means this was a direct/deep load with no
-  // in-app history to go back to, so route to the parent listing instead of leaving the app.
-  const goBack = () => { if (loc.key && loc.key !== 'default') nav(-1); else nav(fallback || '/app'); };
-
+export function PageHeader({ eyebrow, title, actions }) {
   return (
     <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div className="flex items-start gap-3">
-        {show && (
-          <button type="button" onClick={goBack} aria-label="Go back"
-            className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line text-ink-soft transition hover:bg-faint focus:outline-none focus:ring-2 focus:ring-brand/40">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
-              <path d="M12 5l-5 5 5 5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        )}
-        <div>
-          {eyebrow && <div className="eyebrow mb-1.5">{eyebrow}</div>}
-          <h1 className="text-[27px] font-extrabold leading-tight text-ink">{title}</h1>
-        </div>
+      <div>
+        {eyebrow && <div className="eyebrow mb-1.5">{eyebrow}</div>}
+        <h1 className="text-[27px] font-extrabold leading-tight text-ink">{title}</h1>
       </div>
       {actions && <div className="flex gap-2.5">{actions}</div>}
     </div>
@@ -91,9 +58,7 @@ export function Badge({ status, children }) {
 
 export function Table({ head, children }) {
   return (
-    // overflow-x-auto (not hidden) so wide tables scroll horizontally instead of clipping
-    // columns / action controls on narrow viewports (req #3).
-    <div className="card overflow-x-auto">
+    <div className="card overflow-hidden">
       <table className="w-full">
         <thead className="border-b border-line bg-canvas">
           <tr>{head.map((h) => <th key={h} className="th">{h}</th>)}</tr>
