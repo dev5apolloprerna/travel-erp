@@ -8,7 +8,7 @@ const dt = (d) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
  * Build the invoice PDF and stream it into `stream` (an HTTP response or a buffer collector).
  * @param {object} opts { order, settings, party }  party = customer or company
  */
-export const buildInvoicePdf = ({ order, settings, party, docTitle = 'TAX INVOICE' }, stream) => {
+export const buildInvoicePdf = ({ order, settings, party }, stream) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   doc.pipe(stream);
 
@@ -32,19 +32,12 @@ export const buildInvoicePdf = ({ order, settings, party, docTitle = 'TAX INVOIC
   doc.text(addr.join('\n'), 40, 68, { width: 300 });
 
   doc.fillColor(INK).fontSize(16).font('Helvetica-Bold')
-    .text(docTitle, 350, 45, { width: pageW - 310, align: 'right' });
+    .text('TAX INVOICE', 350, 45, { width: pageW - 310, align: 'right' });
   doc.fontSize(9).font('Helvetica').fillColor(MUTED)
     .text(`Invoice No: ${order.invoiceNo || '-'}`, 350, 70, { width: pageW - 310, align: 'right' })
     .text(`Invoice Date: ${dt(order.invoiceDate || order.createdAt)}`, { width: pageW - 310, align: 'right' })
     .text(`Order No: ${order.orderNo || '-'}`, { width: pageW - 310, align: 'right' })
     .text(`Type: ${order.invoiceType || 'DOMESTIC'}`, { width: pageW - 310, align: 'right' });
-
-  // req #8: mark a cancelled invoice (the record is kept; a credit note was raised).
-  if (order.invoiceCancelled) {
-    doc.fillColor('#c0392b').fontSize(10).font('Helvetica-Bold')
-      .text(`CANCELLED${order.creditNoteNo ? ` — Credit Note ${order.creditNoteNo}` : ''}`,
-        350, 128, { width: pageW - 310, align: 'right' });
-  }
 
   doc.moveTo(40, 140).lineTo(40 + pageW, 140).strokeColor('#e2e8f2').stroke();
 
@@ -75,8 +68,6 @@ export const buildInvoicePdf = ({ order, settings, party, docTitle = 'TAX INVOIC
     line.sectorFrom && line.sectorTo ? `${line.sectorFrom} - ${line.sectorTo}` : '',
     line.ticketNo ? `Ticket: ${line.ticketNo}` : '',
     line.airlinePnr || line.railwayPnr ? `PNR: ${line.airlinePnr || line.railwayPnr}` : '',
-    // req #3-#6: PNR / Purchase Order unique number (Cab/Visa/Event/Hotel and any service).
-    line.pnrPoNumber ? `PNR/PO: ${line.pnrPoNumber}` : '',
     line.travelDate ? dt(line.travelDate) : '',
   ].filter(Boolean).join('  |  ');
   doc.fillColor(INK).fontSize(10).font('Helvetica-Bold').text('Service', 40, y);
@@ -92,9 +83,6 @@ export const buildInvoicePdf = ({ order, settings, party, docTitle = 'TAX INVOIC
     // Generic line-item source (e.g. Supplier Invoices, req #5) — reuses this whole
     // template/format; only the row source differs from the service-charge path.
     chargeRows = order.pdfLines.map((l) => [l.description || 'Item', l.amount]);
-  } else if (order.isPackage && Array.isArray(order.invoicePackageLines)) {
-    // Package invoice: one row per included service (req #3).
-    chargeRows = order.invoicePackageLines.map((l) => [l.description || l.serviceType || 'Service', l.amount]);
   } else if (svc === 'HOTEL') {
     chargeRows = (order.invoiceRooms || []).map((r, i) => [
       `${r.roomType || 'Room'} (${Number(r.roomCount || r.rooms) || 0} × ${money(r.rate)}, ${Number(r.taxPercent) || 0}%)`,
@@ -137,7 +125,6 @@ export const buildInvoicePdf = ({ order, settings, party, docTitle = 'TAX INVOIC
   if (order.tdsAmount) row('TDS', `- ${money(order.tdsAmount)}`);
   if (order.tcsAmount) row('TCS', `- ${money(order.tcsAmount)}`);
   if (order.govtTaxAmount) row('Govt Tax', `+ ${money(order.govtTaxAmount)}`);
-  if (order.serviceChargeAmount) row('360 Service Charge', `+ ${money(order.serviceChargeAmount)}`);  // req #7
   doc.moveTo(labelX, y).lineTo(40 + pageW, y).strokeColor('#e2e8f2').stroke();
   y += 6;
   row('Net Invoice Amount', money(order.netInvoiceAmount), true);

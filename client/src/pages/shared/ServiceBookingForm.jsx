@@ -1,22 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Field, Input, Select } from '../../components/ui';
 import api from '../../api/client';
 import { formFor, isHotelLike } from './serviceForms';
 
 // Dropdown that loads its options from a me_ master collection via the staff options API.
 // byName=false (default): stores the record id (value). byName=true: stores the name (label),
-// used where the booking/invoice expects the plain text value (e.g. Meal Plan, Quota).
-// `service` is forwarded for service-scoped masters (the CRS "PNR From" dropdown, req #4).
-function MRefSelect({ masterKey, value, onChange, byName = false, service }) {
+// used where the booking/invoice expects the plain text value (e.g. Hotel Name, Meal Plan, Quota).
+function MRefSelect({ masterKey, value, onChange, byName = false }) {
   const [options, setOptions] = useState([]);
   useEffect(() => {
     let alive = true;
-    const url = `/services/master-options/${masterKey}${service ? `?service=${encodeURIComponent(service)}` : ''}`;
-    api.get(url)
+    api.get(`/services/master-options/${masterKey}`)
       .then((r) => { if (alive) setOptions(r.data || []); })
       .catch(() => { if (alive) setOptions([]); });
     return () => { alive = false; };
-  }, [masterKey, service]);   // re-fetch when the service changes so options stay in sync (req #4)
+  }, [masterKey]);
   return (
     <Select value={value || ''} onChange={(e) => onChange(e.target.value)}>
       <option value="">Select…</option>
@@ -25,68 +23,6 @@ function MRefSelect({ masterKey, value, onChange, byName = false, service }) {
         return <option key={o.value} value={v}>{o.label}</option>;
       })}
     </Select>
-  );
-}
-
-// Searchable autocomplete over a large master (the Account table) — server-side search so any
-// eligible record is findable without loading them all at once (req #1/#2/#3). Stores the account
-// NAME (so it prints on the invoice and existing bookings stay compatible); the saved value shows
-// when editing. Debounced; closes on outside click.
-function MSearchSelect({ masterKey, value, onChange, placeholder = 'Type to search…' }) {
-  const [q, setQ] = useState(value || '');
-  const [opts, setOpts] = useState([]);
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const boxRef = useRef(null);
-
-  // Keep the input in sync when the parent value changes (e.g. loading a record to edit).
-  useEffect(() => { setQ(value || ''); }, [value]);
-
-  // Debounced server-side search whenever the box is open and the query changes.
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    setLoading(true);
-    const t = setTimeout(() => {
-      api.get(`/services/master-options/${masterKey}`, { params: { search: q || undefined, limit: 25 } })
-        .then((r) => { if (alive) setOpts(r.data || []); })
-        .catch(() => { if (alive) setOpts([]); })
-        .finally(() => { if (alive) setLoading(false); });
-    }, 250);
-    return () => { alive = false; clearTimeout(t); };
-  }, [q, open, masterKey]);
-
-  // Close when clicking outside.
-  useEffect(() => {
-    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, []);
-
-  const pick = (label) => { onChange(label); setQ(label); setOpen(false); };
-
-  return (
-    <div ref={boxRef} className="relative">
-      <Input
-        value={q}
-        placeholder={placeholder}
-        onFocus={() => setOpen(true)}
-        onChange={(e) => { setQ(e.target.value); onChange(e.target.value); if (!open) setOpen(true); }}
-      />
-      {open && (
-        <div className="absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-line bg-white py-1 shadow-card">
-          {loading && <div className="px-3 py-2 text-sm text-ink-muted">Searching…</div>}
-          {!loading && opts.length === 0 && <div className="px-3 py-2 text-sm text-ink-muted">No matching accounts.</div>}
-          {!loading && opts.map((o) => (
-            <button type="button" key={o.value}
-              onMouseDown={(e) => { e.preventDefault(); pick(o.label); }}
-              className="block w-full px-3 py-2 text-left text-sm text-ink-soft hover:bg-faint">
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -117,14 +53,10 @@ export default function ServiceBookingForm({ serviceName, value, onChange }) {
               <Select value={value[key] || ''} onChange={set(key)}>
                 {(options || []).map((o) => <option key={o} value={o}>{o || 'Select…'}</option>)}
               </Select>
-            ) : type === 'msearch' ? (
-              <MSearchSelect masterKey={options} value={value[key]} onChange={setVal(key)} />
             ) : type === 'mref' ? (
-              <MRefSelect masterKey={options} value={value[key]} onChange={setVal(key)}
-                service={options === 'cRS' ? serviceName : undefined} />
+              <MRefSelect masterKey={options} value={value[key]} onChange={setVal(key)} />
             ) : type === 'mname' ? (
-              <MRefSelect masterKey={options} value={value[key]} onChange={setVal(key)} byName
-                service={options === 'cRS' ? serviceName : undefined} />
+              <MRefSelect masterKey={options} value={value[key]} onChange={setVal(key)} byName />
             ) : (
               <Input type={type || 'text'} value={value[key] || ''} onChange={set(key)} />
             )}
