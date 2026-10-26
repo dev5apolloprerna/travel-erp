@@ -53,6 +53,17 @@ const websiteBookingSchema = new mongoose.Schema(
 
     status: { type: String, enum: ['NEW', 'CONFIRMED', 'CANCELLED'], default: 'NEW' },
     staffNotes: { type: String, default: '' },
+
+    // Customer-initiated cancellation (v59).
+    cancelReason: { type: String, default: '' },
+    cancelledAt: { type: Date, default: null },
+
+    // v50 (req 2.6): reserved booking-workflow flag. Default NULL (unset) — no behaviour is attached
+    // here beyond storage; it is set by whatever pending/approval workflow uses it. Existing records
+    // read as null. (MongoDB is schemaless, so no SQL migration is needed; adding this field is safe
+    // for existing documents.)
+    pending: { type: Boolean, default: null },
+
   },
   { timestamps: true }
 );

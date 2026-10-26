@@ -3,6 +3,14 @@ import TourPackage from '../models/TourPackage.js';
 import { Faq, Testimonial } from '../models/Content.js';
 import Settings from '../models/Settings.js';
 import FrontInquiry from '../models/FrontInquiry.js';
+import TravelInspiration from '../models/TravelInspiration.js';
+import CustomizeTrip from '../models/CustomizeTrip.js';
+import OurTeam from '../models/OurTeam.js';
+import Banner from '../models/Banner.js';
+import VideoGallery from '../models/VideoGallery.js';
+import Wishlist from '../models/Wishlist.js';
+import OtherPage from '../models/OtherPage.js';
+
 import { sendMail } from '../utils/mailer.js';
 
 /**
@@ -270,3 +278,113 @@ export const deleteInquiry = async (req, res) => {
   await FrontInquiry.findByIdAndDelete(req.params.id);
   res.json({ message: 'Inquiry deleted' });
 };
+
+/* ======================= v39 PUBLIC STORE ENDPOINTS ======================= */
+
+// POST /api/public/travel-inspiration   body: { email }
+// Stores the email once; a repeat email is accepted but not duplicated (unique email).
+export const storeTravelInspiration = async (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    return res.status(400).json({ message: 'A valid email is required.' });
+  const existing = await TravelInspiration.findOne({ email });
+  if (existing) return res.status(200).json({ message: 'You are already subscribed.', id: existing._id, duplicate: true });
+  const row = await TravelInspiration.create({ email });
+  res.status(201).json({ message: 'Thank you! You are subscribed.', id: row._id });
+};
+
+// POST /api/public/customize-trip   body: all CustomizeTrip fields (any subset; defaults null)
+export const storeCustomizeTrip = async (req, res) => {
+  const b = req.body || {};
+  const pick = (k) => (b[k] === undefined || b[k] === '' ? null : b[k]);
+  const row = await CustomizeTrip.create({
+    like_to_tavel: pick('like_to_tavel'),
+    PreferredDestination: pick('PreferredDestination'),
+    number_of_days: pick('number_of_days'),
+    Travellerscount: pick('Travellerscount'),
+    Preferred_Travel_Date: pick('Preferred_Travel_Date'),
+    Trip_Type: pick('Trip_Type'),
+    Hotel_Preference: pick('Hotel_Preference'),
+    budget_of_planing: pick('budget_of_planing'),
+    Budget_Type: pick('Budget_Type'),
+    name: pick('name'),
+    phone: pick('phone'),
+    email: pick('email'),
+    Special_Requirements: pick('Special_Requirements'),
+    package_id: b.package_id || null,
+  });
+  res.status(201).json({ message: 'Your customise-trip request has been received.', id: row._id });
+};
+
+// GET /api/public/banners   -> website banners for public display (req #9). Public image URLs,
+// newest first; only safe fields are exposed (no internal/admin data).
+export const listBannersPublic = async (req, res) => {
+  const rows = await Banner.find().sort({ created_date: -1, createdAt: -1 }).lean();
+  res.json(rows.map((b) => ({
+    id: b._id,
+    title: b.title || '',
+    image_url: absoluteUrl(req, b.bannerImage),
+  })));
+};
+
+// GET /api/public/video-gallery   -> public Video Gallery listing (req #6). Read-only, no auth.
+// Reuses the existing VideoGallery model/data. The schema has no active/publish flag, so every
+// gallery row is public; newest first. Relative links are made absolute via the shared helper.
+export const listVideosPublic = async (req, res) => {
+  const rows = await VideoGallery.find().sort({ createdAt: -1 }).lean();
+  res.json(rows.map((v) => ({
+    id: v._id,
+    title: v.title || '',
+    description: v.description || '',
+    video_url: absoluteUrl(req, v.video_url_link),
+  })));
+};
+
+// GET /api/public/other-pages        -> all static pages
+// GET /api/public/other-pages/:id     -> one page (or ?id=). No id => all (v58).
+export const listOtherPagesPublic = async (req, res) => {
+  await OtherPage.seedDefaults();
+  // `description` is returned as PLAIN TEXT (HTML stripped) so it never shows raw tags (v59); the
+  // original markup is still available as `description_html` for consumers that render HTML.
+  const shape = (r) => ({
+    id: r._id,
+    pagename: r.pagename,
+    description: htmlToText(r.description || ''),
+    description_html: r.description || '',
+  });
+
+  const id = req.params.id || req.query.id;
+  if (id) {
+    const row = await OtherPage.findById(id).catch(() => null);
+    if (!row) return res.status(404).json({ message: 'Page not found' });
+    return res.json(shape(row));
+  }
+  const rows = await OtherPage.find().sort({ createdAt: 1 }).lean();
+  res.json(rows.map(shape));
+};
+
+// GET /api/public/our-team   -> active team members, newest first
+export const listOurTeamPublic = async (req, res) => {
+  const rows = await OurTeam.find().sort({ createdAt: -1 }).lean();
+  res.json(rows.map((t) => ({
+    id: t._id, name: t.name, designation: t.designation, department: t.department,
+    flag: t.flag, photo_url: absoluteUrl(req, t.photo),
+  })));
+};
+
+// POST /api/public/wishlist   body: { websitecustomer_id, package_id }
+export const storeWishlist = async (req, res) => {
+  const { websitecustomer_id, package_id } = req.body || {};
+  if (!websitecustomer_id || !package_id)
+    return res.status(400).json({ message: 'websitecustomer_id and package_id are required.' });
+  try {
+    const existing = await Wishlist.findOne({ websitecustomer_id, package_id });
+    if (existing) return res.status(200).json({ message: 'Already in wishlist.', id: existing._id, duplicate: true });
+    const row = await Wishlist.create({ websitecustomer_id, package_id });
+    res.status(201).json({ message: 'Added to wishlist.', id: row._id });
+  } catch (err) {
+    if (err?.code === 11000) return res.status(200).json({ message: 'Already in wishlist.', duplicate: true });
+    res.status(400).json({ message: 'Could not add to wishlist.' });
+  }
+};
+

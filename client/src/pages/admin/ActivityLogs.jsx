@@ -6,7 +6,7 @@ const MODULES = ['', 'Auth', 'Order', 'Customer', 'Invoice', 'Payment', 'Company
   'Service', 'MainCompany', 'SupplierInvoice', 'Holiday', 'Leave', 'SalarySlip',
   'DestinationCategory', 'Destination', 'TourPackage', 'FAQ', 'Testimonial',
   'Banner', 'VideoGallery', 'OurTeam', 'Cluster', 'Division', 'Grade', 'Department',
-  'Passenger', 'SocietyMember', 'Master', 'WebsiteAuth'];
+  'Passenger', 'SocietyMember', 'Master', 'WebsiteAuth', 'OtherPage', 'WebsiteBooking'];
 const actionStyle = (a) => ({
   CREATE: 'PAID', UPDATE: 'PARTIAL', INVOICE_GENERATE: 'PAID', HOLD: 'PARTIAL', RELEASE: 'PARTIAL',
   APPROVE: 'PAID', PAYMENT: 'PAID', LOGIN: 'PARTIAL', LOGOUT: 'PARTIAL',

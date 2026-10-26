@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { visibleMenu } from '../../menuConfig';
 import api from '../../api/client';
+import ReportsNav from './ReportsNav';
 
 const STORAGE_KEY = 'sidebarOpenSections';
 
@@ -49,10 +50,17 @@ export default function Sidebar({ drawer = false, onClose }) {
         <img src="/logo.png" alt="360 Travel Concierge" className="h-10 w-auto object-contain" />
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 pb-6">
-        {groups.map((group, gi) => {
-          // Ungrouped items (Dashboard) sit at the top with no header.
-          if (!group.section) {
+        {/* Reports area (v60.1): render the report catalog as expandable category
+            submenus with in-menu search, instead of the generic section list. */}
+        {resolvedArea === 'reports' && <ReportsNav />}
+
+        {/* Section is chosen from the compact selector in the header (req #3). */}
+        {resolvedArea !== 'reports' && (
+        <div className="mt-3 border-t border-subtle pt-2">
+          {areaGroups.map((group, gi) => {
+            const isOpen = !!open[group.section];
+            const hasActive = group.items.some((it) => (it.end ? pathname === it.to : pathname.startsWith(it.to)));
+
             return (
               <div key={gi}>
                 {group.items.map((it) => (
@@ -62,10 +70,11 @@ export default function Sidebar({ drawer = false, onClose }) {
                 ))}
               </div>
             );
-          }
 
-          const isOpen = !!open[group.section];
-          const hasActive = group.items.some((it) => (it.end ? pathname === it.to : pathname.startsWith(it.to)));
+          })}
+        </div>
+        )}
+      </nav>
 
           return (
             <div key={gi} className="mt-3">

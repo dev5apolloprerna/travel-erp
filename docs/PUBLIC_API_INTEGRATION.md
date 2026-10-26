@@ -274,6 +274,42 @@ surface `message` to the user; treat `401` as "re-login", `409` as "already in u
 
 ---
 
+## I0. CORS error on `/api/public/bookings/:id/confirm` (and other public calls)
+
+Two independent causes, both addressed:
+
+1. **Server CORS code (fixed in v56).** The public API (`/api/public/*`, incl. `/api/public/customer`)
+   is now opened to **any** origin and its pre-flight is answered *before* the restrictive admin CORS,
+   and now allows `PUT`/`DELETE` too. Previously, if the website origin (e.g. the Vercel domain) wasn't
+   in `CLIENT_URL`, the pre-flight came back without `Access-Control-Allow-Origin` and the browser
+   blocked the call. No `CLIENT_URL` change is required for the public API after v56 (but you can still
+   add the website origin to `CLIENT_URL` for the ERP admin app).
+
+2. **`307 Temporary Redirect` from the hosting/proxy (NOT from Node).** In the failing request the
+   `confirm` POST returns `307` — Express never emits that here, so it comes from the reverse proxy in
+   front of Node on `apitravel360.salexo.co.in` (cPanel/LiteSpeed/nginx). The browser will not follow a
+   cross-origin redirect that has no CORS headers, so it reports a CORS error. Fix on the server/proxy:
+   - Make sure the website calls the API over **https directly** (an `http://…` call that the host
+     upgrades to https is itself a redirect). The frontend API base must be
+     `https://apitravel360.salexo.co.in`.
+   - Make the proxy **pass the request straight through to Node without redirecting** (no forced
+     trailing-slash or host canonicalization on `/api/`). Example nginx:
+     ```nginx
+     location /api/ {
+       proxy_pass http://127.0.0.1:5000;     # the Node port
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       proxy_set_header X-Forwarded-For $remote_addr;
+       # do NOT add `rewrite ... redirect` or a trailing-slash redirect here
+     }
+     ```
+     On cPanel "Setup Node.js App"/Passenger, ensure the app's Application URL is the API domain root
+     and there is no `.htaccess` `RewriteRule ... [R=307]` / `RedirectMatch` touching `/api/`.
+   - The Node app now sets `trust proxy`, so it reads `X-Forwarded-Proto` correctly behind the proxy.
+
+   Once the proxy stops issuing the 307 and the website calls https directly, the `confirm` POST
+   reaches Node and returns normally with the CORS headers from fix (1).
+
 ## I. Troubleshooting
 
 | Symptom | Likely cause / fix |

@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { PageHeader, Card, Field, Input, Select } from '../../components/ui';
+import { PageHeader, Card, Field, Select } from '../../components/ui';
 import { iconFor } from '../shared/serviceForms';
 import MultiEntryBookingForm from '../shared/MultiEntryBookingForm';
+import ServiceBookingForm from '../shared/ServiceBookingForm';
+import PassengerFields from '../shared/PassengerFields';
+
 import NewCustomerModal from './NewCustomerModal';
 import { useShellBase } from '../../hooks/useShellBase';
 
@@ -137,8 +140,57 @@ export default function BookingFlow() {
         {newCustNote && <div className="mt-3 rounded-lg bg-accent-light px-3 py-2 text-sm text-accent-dark">{newCustNote}</div>}
       </Card>
 
-      {!chosen ? (
-        <Card title={`Choose service — ${invoiceType === 'DOMESTIC' ? 'Domestic' : 'International'}`}>
+      {/* -------------------- PACKAGE MODE -------------------- */}
+      {mode === 'package' ? (
+        <div className="space-y-4">
+          {pkgLines.map((b, i) => {
+            const svc = svcById(b.serviceId);
+            return (
+              <Card key={i} title={`Service ${String(i + 1).padStart(2, '0')}`}
+                className="mb-0"
+                >
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                  <div className="min-w-[220px] flex-1">
+                    <Field label="Service">
+                      <Select value={b.serviceId} onChange={(e) => setLine(i, { serviceId: e.target.value })}>
+                        <option value="">Select service…</option>
+                        {packageBookable.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+                  {pkgLines.length > 1 && (
+                    <button type="button" onClick={() => removeLine(i)} className="btn-danger btn-sm">Remove service</button>
+                  )}
+                </div>
+                {svc ? (
+                  <>
+                    <ServiceBookingForm serviceName={svc.name} value={b.entry} onChange={(next) => setLine(i, { entry: next })} />
+                    <div className="mt-4">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Passengers</div>
+                      {(b.entry.passengers || []).map((p, pi) => (
+                        <PassengerFields key={pi} value={p} index={pi}
+                          onChange={(next) => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).map((x, xi) => (xi === pi ? next : x)) } })}
+                          onRemove={(b.entry.passengers || []).length > 1 ? () => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).filter((_, xi) => xi !== pi) } }) : undefined} />
+                      ))}
+                      <button type="button" onClick={() => setLine(i, { entry: { ...b.entry, passengers: [...(b.entry.passengers || []), { name: '' }] } })} className="btn-ghost btn-sm">+ Add passenger</button>
+                    </div>
+                  </>
+                ) : <p className="text-sm text-ink-muted">Choose a service to enter its booking details.</p>}
+              </Card>
+            );
+          })}
+
+          <button type="button" onClick={addLine} className="btn-accent btn-sm">+ Add service to package</button>
+
+          <div className="flex gap-2">
+            <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : (editId ? 'Update package' : 'Save package booking')}</button>
+          </div>
+          <p className="text-xs text-ink-muted">A package creates a single order containing all the services above. Pricing per service is entered at invoice generation.</p>
+        </div>
+      ) : !chosen ? (
+        /* -------------------- SINGLE MODE: service picker -------------------- */
+        <Card title={`Choose service — ${typeLabel}`}>
+
           {bookable.length === 0 ? (
             <p className="text-sm text-ink-muted">
               No {invoiceType.toLowerCase()} services available. Add them under <b>Administration → Service Master</b>,

@@ -46,6 +46,7 @@ import DestinationMaster from './pages/cms/DestinationMaster';
 import PackageMaster from './pages/cms/PackageMaster';
 import ContentMaster from './pages/cms/ContentMaster';
 import WebsiteBookings from './pages/cms/WebsiteBookings';
+import OtherPages from './pages/cms/OtherPages';
 import InquiryList from './pages/cms/InquiryList';
 import InvoiceGenerate from './pages/invoice/InvoiceGenerate';
 
@@ -58,6 +59,11 @@ import MemberPortal from './pages/portal/MemberPortal';
 
 import MainCompanies from './pages/org/MainCompanies';
 import SupplierInvoices from './pages/org/SupplierInvoices';
+import CreditNotes from './pages/invoice/CreditNotes';
+import ActivityLogs from './pages/admin/ActivityLogs';
+import ReportsHub from './pages/reports/ReportsHub';
+import ReportView from './pages/reports/ReportView';
+
 import OwnerLayout from './pages/owner/OwnerLayout';
 import OwnerDashboard from './pages/owner/OwnerDashboard';
 import MasterList from './pages/owner/MasterList';
@@ -163,6 +169,7 @@ export default function App() {
         <Route path="cms/packages" element={<PackageMaster />} />
         <Route path="cms/content" element={<ContentMaster />} />
         <Route path="cms/bookings" element={<WebsiteBookings />} />
+        <Route path="cms/other-pages" element={<OtherPages />} />
         <Route path="cms/inquiries" element={<InquiryList />} />
 
         {/* Invoice generation — shared by all three modules */}
@@ -172,6 +179,14 @@ export default function App() {
         <Route path="admin/employees" element={<EmployeeListAdmin />} />
         <Route path="org/main-companies" element={<MainCompanies />} />
         <Route path="org/supplier-invoices" element={<SupplierInvoices />} />
+        <Route path="invoices/credit-notes" element={<CreditNotes />} />
+        <Route path="activity-logs" element={<ActivityLogs />} />
+
+        {/* Reports module (v60) — Super Admin only. See menuConfig/reportRoutes
+            for the future per-user-rights extension point. */}
+        <Route path="reports" element={<SAOnly><ReportsHub /></SAOnly>} />
+        <Route path="reports/:id" element={<SAOnly><ReportView /></SAOnly>} />
+
         <Route path="admin/employees/new" element={<EmployeeForm />} />
         <Route path="admin/employees/:id" element={<EmployeeForm />} />
         {/* Company Owner account management — Super Admin only (req #3) */}

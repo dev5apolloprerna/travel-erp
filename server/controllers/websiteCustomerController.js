@@ -6,8 +6,15 @@ import Settings from '../models/Settings.js';
 import { signWebsiteToken } from '../middleware/websiteAuth.js';
 import { sendMail } from '../utils/mailer.js';
 import { logActivity } from '../utils/activityLog.js';
+import { publicUrl, removeFile } from '../utils/upload.js';
+import { buildBookingBillPdf } from '../utils/bookingBillPdf.js';
 
 const normEmail = (e) => (e || '').trim().toLowerCase();
+
+// Build an absolute URL for a stored relative /uploads path (so the website can load the image).
+const absUrl = (req, p) => (!p ? null : (/^https?:\/\//i.test(p) ? p : `${req.protocol}://${req.get('host')}${p}`));
+// The customer's public profile with the profile image made absolute (v59).
+const customerPublic = (req, c) => ({ ...c.toPublic(), customer_profile_image: absUrl(req, c.customer_profile_image) });
 
 // POST /api/public/customer/register
 // body: { name, mobile, email, password, conform_passwrd }
@@ -128,7 +135,7 @@ export const resetPassword = async (req, res) => {
 
 // GET /api/public/customer/profile   (auth)
 export const profile = async (req, res) => {
-  res.json({ customer: req.websiteCustomer.toPublic() });
+  res.json({ customer: customerPublic(req, req.websiteCustomer) });   // includes absolute customer_profile_image (v59)
 };
 
 // POST /api/public/customer/change-password   (auth)   body: { currentPassword, newPassword, conform_passwrd }
@@ -181,11 +188,18 @@ export const updateProfile = async (req, res) => {
     if (b[f] !== undefined) patch[f] = String(b[f]).trim();
   }
 
+  // Profile image upload (v59). Field name: customer_profile_image (multipart/form-data).
+  if (req.file) {
+    const oldImage = me.customer_profile_image;
+    patch.customer_profile_image = publicUrl(req, req.file);
+    if (oldImage) removeFile(oldImage);   // clean up the previous file
+  }
+
   try {
     Object.assign(me, patch);
     await me.save();
     await logActivity(req, { action: 'UPDATE', module: 'WebsiteAuth', recordId: me._id, recordLabel: me.email, message: 'Website customer profile updated' });
-    res.json({ message: 'Profile updated.', customer: me.toPublic() });
+    res.json({ message: 'Profile updated.', customer: customerPublic(req, me) });
   } catch (err) {
     if (err?.code === 11000) return res.status(409).json({ message: 'That email or mobile is already in use.' });
     res.status(500).json({ message: 'Could not update the profile. Please try again.' });
@@ -248,8 +262,10 @@ export const myBookings = async (req, res) => {
 
 // GET /api/public/customer/wishlist   (auth) -> this customer's wishlist with package details
 export const myWishlist = async (req, res) => {
+
+  // v59: return the FULL package detail (all fields), not just a few.
   const rows = await Wishlist.find({ websitecustomer_id: req.websiteCustomer._id })
-    .populate('package_id', 'name slug price salePrice bannerImage')
+    .populate('package_id')
     .sort({ createdAt: -1 });
   res.json(rows);
 };
@@ -268,4 +284,49 @@ export const deleteWishlist = async (req, res) => {
   const result = await Wishlist.deleteOne(filter);
   if (!result.deletedCount) return res.status(404).json({ message: 'Wishlist item not found.' });
   res.json({ message: 'Removed from wishlist.', deleted: result.deletedCount });
+};
+
+
+// POST /api/public/customer/bookings/cancel   (auth)   body: { booking_id, cancel_reason }
+// The signed-in customer cancels ONE of their own website bookings. Scoped by the auth token, so a
+// customer can only cancel a booking that belongs to them. Idempotent on an already-cancelled booking.
+export const cancelMyBooking = async (req, res) => {
+  const { booking_id, cancel_reason } = req.body || {};
+  if (!booking_id) return res.status(400).json({ message: 'booking_id is required.' });
+
+  const booking = await WebsiteBooking
+    .findOne({ _id: booking_id, websitecustomer_id: req.websiteCustomer._id })
+    .catch(() => null);
+  if (!booking) return res.status(404).json({ message: 'Booking not found.' });
+  if (booking.status === 'CANCELLED') {
+    return res.status(400).json({ message: 'This booking is already cancelled.', bookingNo: booking.bookingNo, status: 'CANCELLED' });
+  }
+
+  booking.status = 'CANCELLED';
+  booking.cancelReason = (cancel_reason || '').toString().trim();
+  booking.cancelledAt = new Date();
+  await booking.save();
+
+  await logActivity(req, {
+    action: 'CANCEL', module: 'WebsiteBooking', recordId: booking._id, recordLabel: booking.bookingNo,
+    message: 'Website booking cancelled by customer', meta: { reason: booking.cancelReason },
+  });
+  res.json({ message: 'Booking cancelled.', bookingNo: booking.bookingNo, status: booking.status });
+};
+
+// POST /api/public/customer/bookings/bill   (auth)   body: { booking_id }
+// Streams a PDF bill/receipt for ONE of the signed-in customer's bookings.
+export const downloadMyBookingBill = async (req, res) => {
+  const { booking_id } = req.body || {};
+  if (!booking_id) return res.status(400).json({ message: 'booking_id is required.' });
+
+  const booking = await WebsiteBooking
+    .findOne({ _id: booking_id, websitecustomer_id: req.websiteCustomer._id })
+    .catch(() => null);
+  if (!booking) return res.status(404).json({ message: 'Booking not found.' });
+
+  const settings = await Settings.getSettings();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${booking.bookingNo || 'booking'}.pdf"`);
+  buildBookingBillPdf({ booking, settings }, res);
 };

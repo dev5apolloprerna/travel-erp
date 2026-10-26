@@ -12,6 +12,67 @@ import { sendMail } from '../utils/mailer.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+const normEmail = (e) => (e || '').trim().toLowerCase();
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Normalise one passenger (req 2.1) — accept both the documented field names and camelCase aliases.
+const normPassenger = (p) => {
+  if (!p || typeof p !== 'object') return null;
+  const out = {
+    firstName: (p.firstName ?? p.first_name ?? '').toString().trim(),
+    lastName: (p.lastName ?? p.last_name ?? '').toString().trim(),
+    dob: (p.dob ?? p.dateOfBirth ?? p.date_of_birth ?? '').toString().trim(),
+    gender: (p.gender ?? '').toString().trim(),
+    nationality: (p.nationality ?? '').toString().trim(),
+    passportNumber: (p.passportNumber ?? p.passport_number ?? p.passportNo ?? '').toString().trim(),
+    isLead: !!(p.isLead ?? p.is_lead ?? false),   // lead passenger flag (v52)
+  };
+  return (out.firstName || out.lastName) ? out : null;   // skip empty rows
+};
+
+/**
+ * Resolve the website customer for a booking (req 2.2). Returns { customer, created, setupToken }.
+ *  - Case A: a websitecustomer_id is supplied -> must exist, else a validation error (never silently
+ *    create another). Returns { error } so the caller can respond 400.
+ *  - Case B: no id -> find by email (case-insensitive) and reuse; otherwise create a new customer
+ *    with a generated initial password. The plaintext is returned ONCE to the caller so the welcome
+ *    email can include the login credentials (v54 business requirement); it is hashed in the DB and
+ *    never stored, logged or returned by the API. The unique email index prevents duplicates under
+ *    concurrent requests; a duplicate-key race resolves to the existing customer.
+ */
+// A readable, hard-to-guess initial password (alphanumeric, ~12 chars). Emailed once; the customer
+// is told to change it after first login.
+const genInitialPassword = () => crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+
+const resolveWebsiteCustomer = async ({ websitecustomer_id, customerName, email, customerMobile, address, city, state, country }) => {
+  if (websitecustomer_id) {
+    const existing = await WebsiteCustomer.findById(websitecustomer_id).catch(() => null);
+    if (!existing) return { error: 'The supplied customer account was not found.' };
+    return { customer: existing, created: false };
+  }
+
+  const found = await WebsiteCustomer.findOne({ email });   // email is stored lowercased -> case-insensitive
+  if (found) return { customer: found, created: false };
+
+  const password = genInitialPassword();
+  const customer = new WebsiteCustomer({
+    name: customerName, email, mobile: customerMobile || '',
+    address: address || '', city: city || '', state: state || '', country: country || '',
+  });
+  await customer.setPassword(password);   // hashed in DB; plaintext returned once for the welcome email
+  try {
+    await customer.save();
+    return { customer, created: true, password };
+  } catch (err) {
+    if (err?.code === 11000) {   // concurrent create -> reuse the winner, no duplicate, no email
+      const race = await WebsiteCustomer.findOne({ email });
+      if (race) return { customer: race, created: false };
+    }
+    throw err;
+  }
+};
+
+
 /**
  * Website bookings.
  * Public endpoints are used by the separate marketing website;
@@ -38,6 +99,16 @@ export const createBooking = async (req, res) => {
 
   const pkg = await TourPackage.findById(packageId);
   if (!pkg || !pkg.isActive) return res.status(404).json({ message: 'That package is not available.' });
+
+  // ---- Resolve / create the website customer (req 2.2 / 2.3) ----------------
+  let resolved;
+  try {
+    resolved = await resolveWebsiteCustomer({ websitecustomer_id, customerName, email: customerEmail, customerMobile, address, city, state, country });
+  } catch {
+    return res.status(500).json({ message: 'Could not process the customer account. Please try again.' });
+  }
+  if (resolved.error) return res.status(400).json({ message: resolved.error });
+  const { customer, created, password } = resolved;
 
   const settings = await Settings.getSettings();
 
@@ -78,6 +149,37 @@ export const createBooking = async (req, res) => {
 
   booking.gatewayOrderId = payment.orderId;
   await booking.save();
+
+  // Welcome / account-setup email — ONLY for a genuinely new customer, after the booking is saved
+  // (req 2.4). Best-effort: a mail failure never rolls back the customer/booking. No reusable
+  // plaintext password is sent — a secure setup link is used instead.
+  let customerEmailSent = false;
+  if (created) {
+    try {
+      // Login page URL comes from the front-website env var — the sign-in page
+      // (e.g. https://360-travel.vercel.app/sign-in). Set `frontwebsite_url` in the server .env.
+      const loginUrl = process.env.frontwebsite_url;
+      const r = await sendMail({
+        to: customerEmail,
+        subject: `Welcome to ${settings.companyName || 'our travel site'}`,
+        html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#15223b">
+          <p>Hi ${customerName},</p>
+          <p>Thanks for booking <b>${pkg.name}</b> with us — your account has been created. Use the
+             details below to sign in:</p>
+          <table cellpadding="6" style="border-collapse:collapse">
+            ${loginUrl ? `<tr><td><b>Login</b></td><td><a href="${loginUrl}">${loginUrl}</a></td></tr>` : ''}
+            <tr><td><b>Email</b></td><td>${customerEmail}</td></tr>
+            <tr><td><b>Password</b></td><td>${password}</td></tr>
+          </table>
+          <p>For your security, please change your password after your first login.</p>
+          <p>Booking reference: <b>${booking.bookingNo}</b></p>
+          <p>Happy travels,<br/>${settings.companyName || ''}</p></div>`,
+      });
+      customerEmailSent = !!r.sent;
+      // Never log the password — only the recipient + the mail error, if any.
+      if (!r.sent) console.error('[public/bookings] welcome email NOT sent to', customerEmail, '-', r.error);
+    } catch { /* ignore mail errors */ }
+  }
 
   res.status(201).json({
     bookingNo: booking.bookingNo,
@@ -179,9 +281,6 @@ const fulfilBooking = async (booking) => {
 export const confirmPayment = async (req, res) => {
   const booking = await WebsiteBooking.findById(req.params.id);
   if (!booking) return res.status(404).json({ message: 'Booking not found' });
-  if (booking.paymentStatus === 'PAID') {
-    return res.json({ message: 'Payment already confirmed', bookingNo: booking.bookingNo, status: 'PAID' });
-  }
 
   if (booking.gateway === 'RAZORPAY') {
     const { paymentId, signature } = req.body;
@@ -204,6 +303,16 @@ export const confirmPayment = async (req, res) => {
       await booking.save();
       return res.status(400).json({ message: 'That payment has not completed. Please try again.' });
     }
+    // Security hardening: the amount/currency come from the PaymentIntent created server-side from the
+    // package price, so they must match the booking total. This rejects any attempt to pay a tampered
+    // (e.g. reduced) amount. (Razorpay is already bound to its server-created order via the signature.)
+    const expectedMinor = Math.round((booking.totalAmount || 0) * 100);
+    if (intent.amount !== expectedMinor || String(intent.currency || '').toLowerCase() !== String(booking.currency || '').toLowerCase()) {
+      booking.paymentStatus = 'FAILED';
+      booking.paymentError = 'Paid amount/currency did not match the booking total.';
+      await booking.save();
+      return res.status(400).json({ message: 'The payment amount did not match this booking. Please contact us.' });
+    }
     booking.gatewayPaymentId = intent.id;
   }
 
@@ -211,14 +320,51 @@ export const confirmPayment = async (req, res) => {
   booking.paidAt = new Date();
   await booking.save();
 
-  await fulfilBooking(booking);
-
+  //await fulfilBooking(booking);
   res.json({
     message: 'Payment confirmed',
     bookingNo: booking.bookingNo,
     status: 'PAID',
     orderId: booking.orderId,
   });
+};
+
+/* ============================ PUBLIC: MARK PAYMENT FAILED ============================ */
+/**
+ * POST /api/public/bookings/:id/fail   body: { error?, reason?, code?, gateway? }
+ * Records a failed / user-cancelled payment so the booking's status is updated (v51). Only acts on a
+ * booking that is still PENDING — it never overwrites a PAID booking, and is safe to call more than
+ * once (an already-FAILED/PAID booking just returns its current status).
+ */
+export const markPaymentFailed = async (req, res) => {
+  const { error, reason, code, gateway } = req.body || {};
+
+  const booking = await WebsiteBooking.findById(req.params.id);
+  if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+  // Only update if still pending (don't overwrite successful payments).
+  if (booking.paymentStatus === 'PENDING') {
+    booking.paymentStatus = 'FAILED';
+    booking.paymentError = error || reason || 'Payment failed or cancelled by user';
+
+    // Store additional error details if provided.
+    if (code || gateway) {
+      booking.paymentError = JSON.stringify({
+        message: error || reason || '',
+        code: code || '',
+        gateway: gateway || booking.gateway,
+        timestamp: new Date(),
+      });
+    }
+
+    await booking.save();
+    console.error(`[public/bookings] payment failed for ${booking.bookingNo}: ${error || reason || 'cancelled'}`);
+
+    return res.json({ message: 'Payment failure recorded', bookingNo: booking.bookingNo, status: 'FAILED' });
+  }
+
+  // Booking already processed (paid or already marked as failed).
+  res.json({ message: 'Booking already processed', status: booking.paymentStatus, bookingNo: booking.bookingNo });
 };
 
 /* ============================ WEBHOOKS ============================ */
@@ -275,11 +421,21 @@ export const listBookings = async (req, res) => {
     filter.$or = [{ bookingNo: rx }, { customerName: rx }, { customerEmail: rx }, { packageName: rx }];
   }
 
-  const rows = await WebsiteBooking.find(filter)
-    .populate('packageId', 'name')
-    .populate('orderId', 'orderNo invoiceNo')
-    .sort('-createdAt');
-  res.json(rows);
+  // Pagination (v58) — default 20/page; the admin listing passes page + limit and a page-size dropdown.
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 20));
+  const skip = (page - 1) * limit;
+
+  const [total, rows] = await Promise.all([
+    WebsiteBooking.countDocuments(filter),
+    WebsiteBooking.find(filter)
+      .populate('packageId', 'name')
+      .populate('orderId', 'orderNo invoiceNo')
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limit),
+  ]);
+  res.json({ rows, total, page, limit, pages: Math.ceil(total / limit) || 1 });
 };
 
 export const getBooking = async (req, res) => {

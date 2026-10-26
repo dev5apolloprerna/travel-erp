@@ -1,5 +1,16 @@
 // Central menu definition. `key` is used for employee menu-rights filtering.
-// module (if set) also gates by employee.modules.
+// `module` (if set) also gates by employee.modules.
+// `area` groups the section under one of the four landing sections (req #5):
+//   website | booking | account | master. Groups with area null (Dashboard) show in every area.
+export const AREAS = [
+  { key: 'website', label: 'Website', desc: 'Destinations, packages, website content & enquiries' },
+  { key: 'booking', label: 'Booking', desc: 'Retail, B2B and Society orders & bookings' },
+  { key: 'account', label: 'Account', desc: 'Invoices, credit notes & accounting' },
+  { key: 'master', label: 'Master', desc: 'Services, society masters, team & settings' },
+  // v60: Reports area. Visible to Super Admin only (see note on `reports` keys below).
+  { key: 'reports', label: 'Reports', desc: 'Pre-designed & user-designed business reports' },
+];
+
 export const MENU = [
   { section: null, items: [{ key: 'dashboard', label: 'Dashboard', to: '/app', end: true }] },
   // Super Admin → Company Owner management (list/create/edit). This opens the management
@@ -28,10 +39,23 @@ export const MENU = [
   {
     section: 'Society Masters', module: 'FIT',
     items: [
+      { key: 'cms-categories', label: 'Destination Categories', to: '/app/cms/categories' },
+      { key: 'cms-destinations', label: 'Destinations', to: '/app/cms/destinations' },
+      { key: 'cms-packages', label: 'Tour Packages', to: '/app/cms/packages' },
+      { key: 'cms-content', label: 'FAQ & Testimonials', to: '/app/cms/content' },
+      { key: 'cms-banners', label: 'Banner Master', to: '/app/cms/banners' },
+      { key: 'cms-videos', label: 'Video Gallery', to: '/app/cms/videos' },
+      { key: 'cms-team', label: 'Our Team', to: '/app/cms/team' },
+      { key: 'cms-travel-inspiration', label: 'Travel Inspiration', to: '/app/cms/travel-inspiration' },
+      { key: 'cms-customize-trip', label: 'Customize Trip', to: '/app/cms/customize-trip' },
+      { key: 'cms-bookings', label: 'Website Bookings', to: '/app/cms/bookings' },
+      { key: 'cms-other-pages', label: 'Other Pages', to: '/app/cms/other-pages' },
+      { key: 'cms-inquiries', label: 'Inquiries', to: '/app/cms/inquiries' },
       { key: 'master-cluster', label: 'Cluster', to: '/app/masters/clusters' },
       { key: 'master-division', label: 'Division', to: '/app/masters/divisions' },
       { key: 'master-grade', label: 'Grade', to: '/app/masters/grades' },
       { key: 'master-department', label: 'Department', to: '/app/masters/departments' },
+
     ],
   },
   {
@@ -72,7 +96,39 @@ export const MENU = [
       { key: 'change-password', label: 'Change Password', to: '/app/account/password' },
     ],
   },
+
+  // ---- Reports (v60) ----
+  // Super-Admin only for now. The `reports-hub` key is NOT in ALWAYS_ALLOWED or
+  // CO_ALLOWED and is never seeded into any user's `menus`, so visibleMenu() only
+  // surfaces it when `all` (SUPER_ADMIN) is true. Future per-user report rights
+  // (backend keyed `reports.<id>`) can grant this entry to other roles later.
+  {
+    section: 'Reports', area: 'reports',
+    items: [
+      { key: 'reports-hub', label: 'All Reports', to: '/app/reports', end: true },
+    ],
+  },
 ];
+
+// Per-menu icon used by the collapsed (icon-only) sidebar rail — req (v50 Task 1). Kept as a lookup
+// so the MENU array above stays unchanged; unknown keys fall back to a neutral document glyph.
+const MENU_ICONS = {
+  dashboard: '🏠',
+  'retail-customers': '👤', 'retail-orders': '🧾',
+  'b2b-companies': '🏢',
+  'fit-dashboard': '📊', 'fit-doctors': '🧍', 'fit-employees': '👥', 'fit-orders': '🧾',
+  'cms-categories': '🗂️', 'cms-destinations': '📍', 'cms-packages': '🧳', 'cms-content': '💬',
+  'cms-banners': '🖼️', 'cms-videos': '🎬', 'cms-team': '👔', 'cms-travel-inspiration': '💡',
+  'cms-customize-trip': '✏️', 'cms-bookings': '🌐', 'cms-other-pages': '📄', 'cms-inquiries': '📩',
+  'admin-supplier-invoices': '📥', 'admin-credit-notes': '🧾', 'admin-settings': '🏷️',
+  'my-profile': '👤', 'change-password': '🔑',
+  'admin-company-owners': '👑', 'admin-services': '🧩', 'admin-employees': '👥',
+  'admin-main-companies': '🏢', 'admin-activity-logs': '📜', 'admin-company-masters': '🗂️',
+  'master-cluster': '🏷️', 'master-division': '🏷️', 'master-grade': '🏷️', 'master-department': '🏷️',
+  'hr-holidays': '📅', 'hr-leaves': '📝', 'hr-my-leave': '📝', 'hr-salary': '💰', 'hr-my-salary': '💰',
+  'reports-hub': '📊',
+};
+export const iconFor = (key) => MENU_ICONS[key] || '📄';
 
 // Menus every logged-in staff user can reach regardless of granted rights.
 const ALWAYS_ALLOWED = ['dashboard', 'my-profile', 'change-password', 'hr-my-leave', 'hr-my-salary'];
