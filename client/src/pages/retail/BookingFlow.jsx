@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { PageHeader, Card, Field, Input, Select } from '../../components/ui';
+import { PageHeader, Card, Field, Select } from '../../components/ui';
 import { iconFor } from '../shared/serviceForms';
 import MultiEntryBookingForm from '../shared/MultiEntryBookingForm';
 import ServiceBookingForm from '../shared/ServiceBookingForm';
+import PassengerFields from '../shared/PassengerFields';
 import NewCustomerModal from './NewCustomerModal';
 import { useShellBase } from '../../hooks/useShellBase';
 
@@ -214,13 +215,9 @@ export default function BookingFlow() {
                     <div className="mt-4">
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Passengers</div>
                       {(b.entry.passengers || []).map((p, pi) => (
-                        <div key={pi} className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto]">
-                          <Input placeholder="Passenger name" value={p.name || ''}
-                            onChange={(e) => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).map((x, xi) => (xi === pi ? { ...x, name: e.target.value } : x)) } })} />
-                          {(b.entry.passengers || []).length > 1 && (
-                            <button type="button" onClick={() => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).filter((_, xi) => xi !== pi) } })} className="btn-ghost btn-sm">Remove</button>
-                          )}
-                        </div>
+                        <PassengerFields key={pi} value={p} index={pi}
+                          onChange={(next) => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).map((x, xi) => (xi === pi ? next : x)) } })}
+                          onRemove={(b.entry.passengers || []).length > 1 ? () => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).filter((_, xi) => xi !== pi) } }) : undefined} />
                       ))}
                       <button type="button" onClick={() => setLine(i, { entry: { ...b.entry, passengers: [...(b.entry.passengers || []), { name: '' }] } })} className="btn-ghost btn-sm">+ Add passenger</button>
                     </div>

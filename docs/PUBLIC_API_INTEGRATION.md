@@ -130,10 +130,13 @@ hashes / stack traces are never returned.
 
 - The existing registration endpoint is `POST /api/public/customer/register`
   `{ name, email, mobile, password, conform_passwrd }` → `201 { message, token, customer, emailSent }`.
-- **Booking-created customers** (Case B above) are created **without** a user-chosen password. Instead
-  of emailing a reusable plaintext password, the welcome email contains a **secure account-setup
-  link** (`${CLIENT_URL}/reset-password?token=…`, valid 7 days) plus the login URL. The customer sets
-  their own password via that link, then logs in normally.
+- **Booking-created customers** (Case B above) are created with a **generated initial password**. The
+  welcome email contains the **login URL + email + password** so the customer can sign in immediately,
+  and asks them to change the password after first login. The login URL comes from the server env
+  `frontwebsite_url` (the sign-in page, e.g. `https://360-travel.vercel.app/sign-in`), falling back to
+  `CLIENT_URL`. The plaintext password is emailed once only — it is hashed in the DB and never stored,
+  logged, or returned by the API. (Security note: emailing an initial password is less secure than a
+  one-time setup link; customers should change it on first login.)
 - The welcome email is sent **only** for a genuinely new customer, **after** the booking is saved, and
   **best-effort**: a mail failure never rolls back the customer or booking. A retry with the same
   email reuses the existing customer and sends **no** second email.
@@ -180,14 +183,43 @@ own record); `401` missing/invalid token. Password hashes are never returned.
 
 ---
 
-## F. Wishlist API removal
+## E2. Customer logout & "My Trips" (v53)
 
-The public wishlist endpoints were **removed** in v50:
-- `POST /api/public/wishlist` — removed.
-- `GET /api/public/customer/wishlist` — removed.
+- `POST /api/public/customer/logout` **(auth)** — acknowledges sign-out and logs it. The token is a
+  stateless JWT, so the frontend completes logout by **discarding the token**; the server does not
+  blacklist it. Returns `{ message }`.
+- `GET /api/public/customer/bookings` **(auth)** — the signed-in customer's own bookings, grouped:
+  ```json
+  { "counts": { "pending":1, "paid":2, "failed":0, "cancelled":1, "upcoming":1, "completed":1 },
+    "pending": [...], "paid": [...], "failed": [...], "cancelled": [...], "upcoming": [...], "completed": [...] }
+  ```
+- `GET /api/public/customer/bookings/:type` **(auth)** (or `?type=`) — one list.
+  `type` = `pending | paid | failed | cancelled | upcoming | completed | all`. Returns
+  `{ type, count, bookings:[...] }`. Each booking has its package populated (`name`, `slug`,
+  `bannerImage`). **Grouping:** pending = PENDING & not cancelled; paid = paymentStatus PAID;
+  failed = FAILED; cancelled = status CANCELLED; upcoming = paid, not cancelled, travelDate ≥ today;
+  completed = paid, not cancelled, travelDate in the past.
 
-The frontend must **no longer call** these. They now return the server's standard not-found response.
-The `wishlists` collection/model is retained (no data deleted).
+## F. Wishlist API
+
+(The v50 removal was reverted in v51 — these endpoints are available.)
+
+- `POST /api/public/wishlist` — add to wishlist. Body `{ websitecustomer_id, package_id }`.
+  Returns `201 { message, id }`, or `200 { message, duplicate:true }` if already present.
+- `GET /api/public/customer/wishlist` — **(auth)** the signed-in customer's wishlist, with package
+  details populated.
+- `POST /api/public/customer/wishlist-delete` — **(auth)** remove ONE of the signed-in customer's
+  wishlist items. Body `{ package_id }` **or** `{ id }` (the wishlist row id). The customer is taken
+  from the token, so a customer can only delete their own entries. Returns `200 { message, deleted }`
+  or `404` if not found.
+
+## F2. Payment failure
+
+- `POST /api/public/bookings/:id/fail` — record a failed / user-cancelled payment. Body (all optional)
+  `{ error, reason, code, gateway }`. Only updates a booking that is still `PENDING` (never overwrites
+  a `PAID` booking); idempotent. Returns `{ message, bookingNo, status }`. Call this from the website
+  when the gateway reports failure or the user closes the checkout, so the booking doesn't stay
+  `PENDING`. (The success path — `POST /bookings/:id/confirm` — is unchanged.)
 
 ---
 
@@ -241,6 +273,42 @@ await fetch(`${API}/customer/profile`, {
 surface `message` to the user; treat `401` as "re-login", `409` as "already in use".
 
 ---
+
+## I0. CORS error on `/api/public/bookings/:id/confirm` (and other public calls)
+
+Two independent causes, both addressed:
+
+1. **Server CORS code (fixed in v56).** The public API (`/api/public/*`, incl. `/api/public/customer`)
+   is now opened to **any** origin and its pre-flight is answered *before* the restrictive admin CORS,
+   and now allows `PUT`/`DELETE` too. Previously, if the website origin (e.g. the Vercel domain) wasn't
+   in `CLIENT_URL`, the pre-flight came back without `Access-Control-Allow-Origin` and the browser
+   blocked the call. No `CLIENT_URL` change is required for the public API after v56 (but you can still
+   add the website origin to `CLIENT_URL` for the ERP admin app).
+
+2. **`307 Temporary Redirect` from the hosting/proxy (NOT from Node).** In the failing request the
+   `confirm` POST returns `307` — Express never emits that here, so it comes from the reverse proxy in
+   front of Node on `apitravel360.salexo.co.in` (cPanel/LiteSpeed/nginx). The browser will not follow a
+   cross-origin redirect that has no CORS headers, so it reports a CORS error. Fix on the server/proxy:
+   - Make sure the website calls the API over **https directly** (an `http://…` call that the host
+     upgrades to https is itself a redirect). The frontend API base must be
+     `https://apitravel360.salexo.co.in`.
+   - Make the proxy **pass the request straight through to Node without redirecting** (no forced
+     trailing-slash or host canonicalization on `/api/`). Example nginx:
+     ```nginx
+     location /api/ {
+       proxy_pass http://127.0.0.1:5000;     # the Node port
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       proxy_set_header X-Forwarded-For $remote_addr;
+       # do NOT add `rewrite ... redirect` or a trailing-slash redirect here
+     }
+     ```
+     On cPanel "Setup Node.js App"/Passenger, ensure the app's Application URL is the API domain root
+     and there is no `.htaccess` `RewriteRule ... [R=307]` / `RedirectMatch` touching `/api/`.
+   - The Node app now sets `trust proxy`, so it reads `X-Forwarded-Proto` correctly behind the proxy.
+
+   Once the proxy stops issuing the 307 and the website calls https directly, the `confirm` POST
+   reaches Node and returns normally with the CORS headers from fix (1).
 
 ## I. Troubleshooting
 

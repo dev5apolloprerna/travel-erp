@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useArea } from '../../context/AreaContext';
 import { visibleMenu, availableAreas, iconFor } from '../../menuConfig';
 import api from '../../api/client';
+import ReportsNav from './ReportsNav';
 
 const STORAGE_KEY = 'sidebarOpenSections';
 
@@ -89,7 +90,12 @@ export default function Sidebar({ drawer = false, collapsed = false, onClose }) 
           </div>
         ))}
 
+        {/* Reports area (v60.1): render the report catalog as expandable category
+            submenus with in-menu search, instead of the generic section list. */}
+        {resolvedArea === 'reports' && <ReportsNav />}
+
         {/* Section is chosen from the compact selector in the header (req #3). */}
+        {resolvedArea !== 'reports' && (
         <div className="mt-3 border-t border-subtle pt-2">
           {areaGroups.map((group, gi) => {
             const isOpen = !!open[group.section];
@@ -121,6 +127,7 @@ export default function Sidebar({ drawer = false, collapsed = false, onClose }) 
             );
           })}
         </div>
+        )}
       </nav>
 
       {/* Collapsed icon rail — desktop collapsed only. Icons with native tooltips (title) + aria-label;

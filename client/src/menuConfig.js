@@ -7,6 +7,8 @@ export const AREAS = [
   { key: 'booking', label: 'Booking', desc: 'Retail, B2B and Society orders & bookings' },
   { key: 'account', label: 'Account', desc: 'Invoices, credit notes & accounting' },
   { key: 'master', label: 'Master', desc: 'Services, society masters, team & settings' },
+  // v60: Reports area. Visible to Super Admin only (see note on `reports` keys below).
+  { key: 'reports', label: 'Reports', desc: 'Pre-designed & user-designed business reports' },
 ];
 
 export const MENU = [
@@ -48,6 +50,7 @@ export const MENU = [
       { key: 'cms-travel-inspiration', label: 'Travel Inspiration', to: '/app/cms/travel-inspiration' },
       { key: 'cms-customize-trip', label: 'Customize Trip', to: '/app/cms/customize-trip' },
       { key: 'cms-bookings', label: 'Website Bookings', to: '/app/cms/bookings' },
+      { key: 'cms-other-pages', label: 'Other Pages', to: '/app/cms/other-pages' },
       { key: 'cms-inquiries', label: 'Inquiries', to: '/app/cms/inquiries' },
     ],
   },
@@ -107,6 +110,18 @@ export const MENU = [
       { key: 'hr-my-salary', label: 'My Salary Slips', to: '/app/hr/my-salary-slips' },
     ],
   },
+
+  // ---- Reports (v60) ----
+  // Super-Admin only for now. The `reports-hub` key is NOT in ALWAYS_ALLOWED or
+  // CO_ALLOWED and is never seeded into any user's `menus`, so visibleMenu() only
+  // surfaces it when `all` (SUPER_ADMIN) is true. Future per-user report rights
+  // (backend keyed `reports.<id>`) can grant this entry to other roles later.
+  {
+    section: 'Reports', area: 'reports',
+    items: [
+      { key: 'reports-hub', label: 'All Reports', to: '/app/reports', end: true },
+    ],
+  },
 ];
 
 // Per-menu icon used by the collapsed (icon-only) sidebar rail — req (v50 Task 1). Kept as a lookup
@@ -118,13 +133,14 @@ const MENU_ICONS = {
   'fit-dashboard': '📊', 'fit-doctors': '🧍', 'fit-employees': '👥', 'fit-orders': '🧾',
   'cms-categories': '🗂️', 'cms-destinations': '📍', 'cms-packages': '🧳', 'cms-content': '💬',
   'cms-banners': '🖼️', 'cms-videos': '🎬', 'cms-team': '👔', 'cms-travel-inspiration': '💡',
-  'cms-customize-trip': '✏️', 'cms-bookings': '🌐', 'cms-inquiries': '📩',
+  'cms-customize-trip': '✏️', 'cms-bookings': '🌐', 'cms-other-pages': '📄', 'cms-inquiries': '📩',
   'admin-supplier-invoices': '📥', 'admin-credit-notes': '🧾', 'admin-settings': '🏷️',
   'my-profile': '👤', 'change-password': '🔑',
   'admin-company-owners': '👑', 'admin-services': '🧩', 'admin-employees': '👥',
   'admin-main-companies': '🏢', 'admin-activity-logs': '📜', 'admin-company-masters': '🗂️',
   'master-cluster': '🏷️', 'master-division': '🏷️', 'master-grade': '🏷️', 'master-department': '🏷️',
   'hr-holidays': '📅', 'hr-leaves': '📝', 'hr-my-leave': '📝', 'hr-salary': '💰', 'hr-my-salary': '💰',
+  'reports-hub': '📊',
 };
 export const iconFor = (key) => MENU_ICONS[key] || '📄';
 

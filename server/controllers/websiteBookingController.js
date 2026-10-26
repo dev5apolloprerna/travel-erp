@@ -26,6 +26,7 @@ const normPassenger = (p) => {
     gender: (p.gender ?? '').toString().trim(),
     nationality: (p.nationality ?? '').toString().trim(),
     passportNumber: (p.passportNumber ?? p.passport_number ?? p.passportNo ?? '').toString().trim(),
+    isLead: !!(p.isLead ?? p.is_lead ?? false),   // lead passenger flag (v52)
   };
   return (out.firstName || out.lastName) ? out : null;   // skip empty rows
 };
@@ -35,10 +36,15 @@ const normPassenger = (p) => {
  *  - Case A: a websitecustomer_id is supplied -> must exist, else a validation error (never silently
  *    create another). Returns { error } so the caller can respond 400.
  *  - Case B: no id -> find by email (case-insensitive) and reuse; otherwise create a new customer
- *    with a secure RANDOM password + an account-setup token (we never email a reusable plaintext
- *    password — req 2.3 security preference). The unique email index prevents duplicates under
+ *    with a generated initial password. The plaintext is returned ONCE to the caller so the welcome
+ *    email can include the login credentials (v54 business requirement); it is hashed in the DB and
+ *    never stored, logged or returned by the API. The unique email index prevents duplicates under
  *    concurrent requests; a duplicate-key race resolves to the existing customer.
  */
+// A readable, hard-to-guess initial password (alphanumeric, ~12 chars). Emailed once; the customer
+// is told to change it after first login.
+const genInitialPassword = () => crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+
 const resolveWebsiteCustomer = async ({ websitecustomer_id, customerName, email, customerMobile, address, city, state, country }) => {
   if (websitecustomer_id) {
     const existing = await WebsiteCustomer.findById(websitecustomer_id).catch(() => null);
@@ -49,16 +55,15 @@ const resolveWebsiteCustomer = async ({ websitecustomer_id, customerName, email,
   const found = await WebsiteCustomer.findOne({ email });   // email is stored lowercased -> case-insensitive
   if (found) return { customer: found, created: false };
 
-  const setupToken = crypto.randomBytes(24).toString('hex');
+  const password = genInitialPassword();
   const customer = new WebsiteCustomer({
     name: customerName, email, mobile: customerMobile || '',
     address: address || '', city: city || '', state: state || '', country: country || '',
-    resetToken: setupToken, resetExpires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),   // 7-day setup window
   });
-  await customer.setPassword(crypto.randomBytes(18).toString('base64url'));   // secure random; never emailed
+  await customer.setPassword(password);   // hashed in DB; plaintext returned once for the welcome email
   try {
     await customer.save();
-    return { customer, created: true, setupToken };
+    return { customer, created: true, password };
   } catch (err) {
     if (err?.code === 11000) {   // concurrent create -> reuse the winner, no duplicate, no email
       const race = await WebsiteCustomer.findOne({ email });
@@ -117,7 +122,7 @@ export const createBooking = async (req, res) => {
     return res.status(500).json({ message: 'Could not process the customer account. Please try again.' });
   }
   if (resolved.error) return res.status(400).json({ message: resolved.error });
-  const { customer, created, setupToken } = resolved;
+  const { customer, created, password } = resolved;
 
   const settings = await Settings.getSettings();
 
@@ -164,21 +169,27 @@ export const createBooking = async (req, res) => {
   let customerEmailSent = false;
   if (created) {
     try {
-      const base = process.env.CLIENT_URL ? String(process.env.CLIENT_URL).split(',')[0] : '';
-      const loginUrl = base ? `${base}/login` : '';
-      const setupUrl = base && setupToken ? `${base}/reset-password?token=${setupToken}` : '';
+      // Login page URL comes from the front-website env var — the sign-in page
+      // (e.g. https://360-travel.vercel.app/sign-in). Set `frontwebsite_url` in the server .env.
+      const loginUrl = process.env.frontwebsite_url;
       const r = await sendMail({
         to: customerEmail,
         subject: `Welcome to ${settings.companyName || 'our travel site'}`,
         html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#15223b">
           <p>Hi ${customerName},</p>
-          <p>Thanks for booking <b>${pkg.name}</b> with us — your account has been created.</p>
-          ${setupUrl ? `<p>Set your password to access your account (link valid 7 days):<br/><a href="${setupUrl}">${setupUrl}</a></p>` : ''}
-          ${loginUrl ? `<p>You can sign in any time at <a href="${loginUrl}">${loginUrl}</a>.</p>` : ''}
+          <p>Thanks for booking <b>${pkg.name}</b> with us — your account has been created. Use the
+             details below to sign in:</p>
+          <table cellpadding="6" style="border-collapse:collapse">
+            ${loginUrl ? `<tr><td><b>Login</b></td><td><a href="${loginUrl}">${loginUrl}</a></td></tr>` : ''}
+            <tr><td><b>Email</b></td><td>${customerEmail}</td></tr>
+            <tr><td><b>Password</b></td><td>${password}</td></tr>
+          </table>
+          <p>For your security, please change your password after your first login.</p>
           <p>Booking reference: <b>${booking.bookingNo}</b></p>
           <p>Happy travels,<br/>${settings.companyName || ''}</p></div>`,
       });
       customerEmailSent = !!r.sent;
+      // Never log the password — only the recipient + the mail error, if any.
       if (!r.sent) console.error('[public/bookings] welcome email NOT sent to', customerEmail, '-', r.error);
     } catch { /* ignore mail errors */ }
   }
@@ -286,9 +297,6 @@ const fulfilBooking = async (booking) => {
 export const confirmPayment = async (req, res) => {
   const booking = await WebsiteBooking.findById(req.params.id);
   if (!booking) return res.status(404).json({ message: 'Booking not found' });
-  if (booking.paymentStatus === 'PAID') {
-    return res.json({ message: 'Payment already confirmed', bookingNo: booking.bookingNo, status: 'PAID' });
-  }
 
   if (booking.gateway === 'RAZORPAY') {
     const { paymentId, signature } = req.body;
@@ -311,6 +319,16 @@ export const confirmPayment = async (req, res) => {
       await booking.save();
       return res.status(400).json({ message: 'That payment has not completed. Please try again.' });
     }
+    // Security hardening: the amount/currency come from the PaymentIntent created server-side from the
+    // package price, so they must match the booking total. This rejects any attempt to pay a tampered
+    // (e.g. reduced) amount. (Razorpay is already bound to its server-created order via the signature.)
+    const expectedMinor = Math.round((booking.totalAmount || 0) * 100);
+    if (intent.amount !== expectedMinor || String(intent.currency || '').toLowerCase() !== String(booking.currency || '').toLowerCase()) {
+      booking.paymentStatus = 'FAILED';
+      booking.paymentError = 'Paid amount/currency did not match the booking total.';
+      await booking.save();
+      return res.status(400).json({ message: 'The payment amount did not match this booking. Please contact us.' });
+    }
     booking.gatewayPaymentId = intent.id;
   }
 
@@ -318,14 +336,51 @@ export const confirmPayment = async (req, res) => {
   booking.paidAt = new Date();
   await booking.save();
 
-  await fulfilBooking(booking);
-
+  //await fulfilBooking(booking);
   res.json({
     message: 'Payment confirmed',
     bookingNo: booking.bookingNo,
     status: 'PAID',
     orderId: booking.orderId,
   });
+};
+
+/* ============================ PUBLIC: MARK PAYMENT FAILED ============================ */
+/**
+ * POST /api/public/bookings/:id/fail   body: { error?, reason?, code?, gateway? }
+ * Records a failed / user-cancelled payment so the booking's status is updated (v51). Only acts on a
+ * booking that is still PENDING — it never overwrites a PAID booking, and is safe to call more than
+ * once (an already-FAILED/PAID booking just returns its current status).
+ */
+export const markPaymentFailed = async (req, res) => {
+  const { error, reason, code, gateway } = req.body || {};
+
+  const booking = await WebsiteBooking.findById(req.params.id);
+  if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+  // Only update if still pending (don't overwrite successful payments).
+  if (booking.paymentStatus === 'PENDING') {
+    booking.paymentStatus = 'FAILED';
+    booking.paymentError = error || reason || 'Payment failed or cancelled by user';
+
+    // Store additional error details if provided.
+    if (code || gateway) {
+      booking.paymentError = JSON.stringify({
+        message: error || reason || '',
+        code: code || '',
+        gateway: gateway || booking.gateway,
+        timestamp: new Date(),
+      });
+    }
+
+    await booking.save();
+    console.error(`[public/bookings] payment failed for ${booking.bookingNo}: ${error || reason || 'cancelled'}`);
+
+    return res.json({ message: 'Payment failure recorded', bookingNo: booking.bookingNo, status: 'FAILED' });
+  }
+
+  // Booking already processed (paid or already marked as failed).
+  res.json({ message: 'Booking already processed', status: booking.paymentStatus, bookingNo: booking.bookingNo });
 };
 
 /* ============================ WEBHOOKS ============================ */
@@ -382,11 +437,21 @@ export const listBookings = async (req, res) => {
     filter.$or = [{ bookingNo: rx }, { customerName: rx }, { customerEmail: rx }, { packageName: rx }];
   }
 
-  const rows = await WebsiteBooking.find(filter)
-    .populate('packageId', 'name')
-    .populate('orderId', 'orderNo invoiceNo')
-    .sort('-createdAt');
-  res.json(rows);
+  // Pagination (v58) — default 20/page; the admin listing passes page + limit and a page-size dropdown.
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 20));
+  const skip = (page - 1) * limit;
+
+  const [total, rows] = await Promise.all([
+    WebsiteBooking.countDocuments(filter),
+    WebsiteBooking.find(filter)
+      .populate('packageId', 'name')
+      .populate('orderId', 'orderNo invoiceNo')
+      .sort('-createdAt')
+      .skip(skip)
+      .limit(limit),
+  ]);
+  res.json({ rows, total, page, limit, pages: Math.ceil(total / limit) || 1 });
 };
 
 export const getBooking = async (req, res) => {

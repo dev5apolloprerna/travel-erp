@@ -2321,3 +2321,376 @@ no icons. v50 adds per-item icons and a real rail.
 
 > Reminder: live email + customer login need `JWT_SECRET`, `CLIENT_URL` and SMTP set in the server
 > environment (see `docs/PUBLIC_API_INTEGRATION.md`).
+
+---
+
+## v51 — Wishlist APIs restored + delete endpoint + payment-fail endpoint
+
+Backend-only; `confirmPayment` and the rest of the payment flow are unchanged.
+- **Reverted the v50 Task-3 removal:** `POST /api/public/wishlist` (publicController.storeWishlist)
+  and `GET /api/public/customer/wishlist` (websiteCustomerController.myWishlist) are back exactly as
+  before, with their `Wishlist` imports restored.
+- **New** `POST /api/public/customer/wishlist-delete` (auth) — `deleteWishlist`: removes ONE wishlist
+  record for the **signed-in** customer. Body `{ package_id }` or `{ id }`; the customer is taken
+  from the auth token and the delete is always scoped to `websitecustomer_id = req.websiteCustomer._id`,
+  so a customer can only delete their own entries. `404` if not found.
+- **New** `POST /api/public/bookings/:id/fail` (public) — `markPaymentFailed`: records a failed /
+  user-cancelled payment so the booking status updates. Reviewed the supplied implementation — it's
+  correct: it only acts on a `PENDING` booking (never overwrites a `PAID` one), stores
+  `error/reason` (or a JSON blob with `code`/`gateway`/timestamp when provided), and is idempotent
+  (an already PAID/FAILED booking returns its current status). Wired as given.
+- Files: `server/controllers/publicController.js`, `server/controllers/websiteCustomerController.js`,
+  `server/controllers/websiteBookingController.js`, `server/routes/publicRoutes.js`,
+  `server/routes/websiteCustomerRoutes.js`; `docs/PUBLIC_API_INTEGRATION.md` updated.
+- Verified: `node --check` + ESM import OK; route introspection confirms `/wishlist`,
+  `/customer/wishlist`, `/customer/wishlist-delete`, and `/bookings/:id/fail` all present.
+
+---
+
+## v52 — Multiple structured passengers + admin booking display
+
+Small, focused change to the public booking + admin Website Bookings view.
+- `server/controllers/websiteBookingController.js` — the passenger normalizer now also accepts the
+  **`isLead`** flag (`is_lead` alias too) alongside firstName/lastName/dob/gender/nationality/
+  passportNumber. Multiple passengers in the `passengers` JSON array are each normalized and stored
+  (the WebsiteBooking `passengers` field is already a flexible array, so no model change). The lead
+  passenger is preserved. Existing validation and the rest of `createBooking` are unchanged.
+- `client/src/pages/cms/WebsiteBookings.jsx` (admin → Website Bookings → View) — replaced the old
+  `passengers.join(', ')` line (which rendered `[object Object]` for structured passengers) with a
+  **Passengers (n)** section that lists each passenger with their full name, a **Lead** badge, and a
+  meta line (gender · DOB · nationality · passport). Backward compatible: older bookings that stored
+  plain strings still render.
+- Verified: `node --check` OK; `vite build` OK.
+
+---
+
+## v53 — Website-customer logout + "My Trips" booking APIs (Node only)
+
+Backend-only; all under `/api/public/customer` and guarded by the website-customer token.
+- `POST /customer/logout` — acknowledges + logs the sign-out. The token is a stateless JWT, so the
+  frontend logs out by discarding the token (no server-side blacklist). `websiteCustomerController.logout`.
+- `GET /customer/bookings` — the signed-in customer's own bookings, grouped with counts:
+  `pending, paid, failed, cancelled, upcoming, completed`.
+- `GET /customer/bookings/:type` (or `?type=`) — one category (`pending|paid|failed|cancelled|upcoming|completed|all`);
+  returns `{ type, count, bookings }` with each booking's package populated.
+  `websiteCustomerController.myBookings`. All queries are scoped to `websitecustomer_id =
+  req.websiteCustomer._id`, so a customer sees only their own bookings.
+- Grouping rules (documented): pending = PENDING & not cancelled; paid = paymentStatus PAID;
+  failed = FAILED; cancelled = status CANCELLED; upcoming = paid & not cancelled & travelDate ≥ today;
+  completed = paid & not cancelled & travelDate in the past.
+- Files: `server/controllers/websiteCustomerController.js`, `server/routes/websiteCustomerRoutes.js`,
+  `docs/PUBLIC_API_INTEGRATION.md`. Verified: `node --check` + route introspection OK.
+
+---
+
+## v54 — Booking welcome email = login credentials; payment price hardening
+
+Backend-only. `createBooking` + payment confirmation.
+- **Welcome email now sends login credentials** (per request): a booking-created customer gets a
+  **generated initial password**, and the email contains **Login URL + Email + Password** (no
+  password-setup/reset link). The login URL comes from the new env var **`frontwebsite_url`** (the
+  sign-in page, e.g. `https://360-travel.vercel.app/sign-in`), falling back to `CLIENT_URL`. The
+  plaintext password is emailed once only — hashed in the DB, never stored/logged/returned. The email
+  asks the customer to change it after first login. Added `frontwebsite_url` to `.env.example`.
+- **Payment price can't be tampered with** (confirmation of existing design + one hardening):
+  prices are always computed **server-side from the package** in `createBooking` / `createPayment` —
+  the browser never supplies the amount. Razorpay payments are bound to the server-created order via
+  the signature. Added a **Stripe amount + currency check** in `confirmPayment`: the PaymentIntent's
+  `amount`/`currency` must equal the booking total, else the payment is marked FAILED and rejected —
+  blocking any attempt to pay a reduced/tampered amount. The working success/failure flow is otherwise
+  unchanged.
+- Files: `server/controllers/websiteBookingController.js`, `server/.env.example`,
+  `docs/PUBLIC_API_INTEGRATION.md`. Verified: `node --check` + ESM import OK.
+
+---
+
+## v55 — Welcome-email login URL uses `frontwebsite_url` only
+
+`createBooking` welcome email: `loginUrl` is now taken solely from `process.env.frontwebsite_url`
+(the `CLIENT_URL` fallback was removed, per request). Set `frontwebsite_url` in the server `.env`
+(e.g. `https://360-travel.vercel.app/sign-in`); if it's unset, the email simply omits the login link.
+File: `server/controllers/websiteBookingController.js`. `node --check` OK.
+
+---
+
+## v56 — Fix CORS on the public API (booking confirm) + document the 307 proxy cause
+
+Root causes of the "CORS error on `/api/public/bookings/:id/confirm`":
+1. **CORS ordering bug (fixed, `server/server.js`):** the restrictive global CORS was registered
+   BEFORE the "public open" CORS, so it answered the public OPTIONS pre-flight without an
+   `Access-Control-Allow-Origin` header whenever the website origin wasn't in `CLIENT_URL`. The public
+   CORS also only allowed `GET/POST/OPTIONS`. Fix: register a permissive `/api/public/*` CORS FIRST
+   (reflects any origin, allows `GET/POST/PUT/DELETE/PATCH/OPTIONS`, explicit `app.options` pre-flight),
+   then the restrictive admin CORS for every other route. Added `app.set('trust proxy', true)`.
+2. **`307 Temporary Redirect` (infra, not code):** Express emits no 307 here — it comes from the
+   reverse proxy/hosting in front of Node, and a cross-origin redirect without CORS headers is blocked
+   by the browser. Documented the fix in `docs/PUBLIC_API_INTEGRATION.md` (§I0): call the API over
+   https directly and make the proxy pass `/api/` straight through without redirecting (nginx/cPanel
+   snippet included).
+
+Files: `server/server.js`, `docs/PUBLIC_API_INTEGRATION.md`. `node --check` OK.
+
+---
+
+## v56.1 — Razorpay callback_url + confirmPayment verification/fulfil disabled (on request)
+
+- `server/utils/payments.js` — `createPayment` Razorpay return now includes
+  `callback_url: process.env.SITE_PAYMENT_CALLBACK_URL` (added `SITE_PAYMENT_CALLBACK_URL` to
+  `.env.example`).
+- `server/controllers/websiteBookingController.js` — `confirmPayment`: the gateway verification block
+  (Razorpay signature / Stripe status+amount checks) and the `await fulfilBooking(booking)` call are
+  **commented out** per request. The endpoint keeps the "already PAID" short-circuit, records the
+  gateway reference from the request body (unverified), marks the booking PAID, and returns. The ERP
+  order is no longer auto-created here — use the admin "Create ERP order now" button or the payment
+  webhook. (Security note: verification is disabled; re-enable the commented block to restore it.)
+- Verified: `node --check` OK.
+
+---
+
+## v56.2 — confirmPayment: verify first, set PAID only after a successful check (reverted v56.1)
+
+Per request, the gateway verification in `confirmPayment` is **re-enabled**: a booking is marked PAID
+ONLY after the payment is verified (Razorpay signature / Stripe status+amount). If verification fails
+it is set FAILED and NOT paid. The handler now also accepts the Razorpay-native field names
+`razorpay_payment_id` / `razorpay_signature` (what the website sends), in addition to
+`paymentId` / `signature`. `fulfilBooking` remains commented (ERP order created via the admin button
+or the webhook). File: `server/controllers/websiteBookingController.js`. `node --check` OK.
+
+---
+
+## v57 — confirmPayment set to the exact provided version
+
+`server/controllers/websiteBookingController.js` → `confirmPayment` replaced with the exact function
+supplied: no "already PAID" short-circuit, Razorpay reads `{ paymentId, signature }` from the body,
+verification active (Razorpay signature / Stripe status + amount), marks PAID after verification, and
+`//await fulfilBooking(booking);` left commented. `node --check` OK.
+
+---
+
+## v58 — Website "Other Pages" (admin + public API) + Website Bookings pagination
+
+### Other Pages (Website → Other Pages)
+- New model `server/models/OtherPage.js` (collection `otherpages`): fields `pagename`, `description`;
+  idempotent `seedDefaults()` inserts the four pages once if empty — **Privacy Policy**,
+  **Terms & Conditions**, **Cancellation and Refund**, **Booking Confirmation & Travel Documents**.
+- Admin (list / view / edit only — no create/delete): `GET /api/cms/other-pages`,
+  `GET /api/cms/other-pages/:id`, `PUT /api/cms/other-pages/:id`
+  (`websiteMasterController.listOtherPages/getOtherPage/updateOtherPage`, edit gated by
+  `can('cms-other-pages','EDIT')`). New menu item **Other Pages** under Website; page
+  `client/src/pages/cms/OtherPages.jsx` — listing with two action icons: **👁️ view detail** and
+  **✏️ edit** (edits `pagename` + `description`). Route `/app/cms/other-pages`.
+- Public API: `GET /api/public/other-pages/:id?` (also `?id=`) — **id → that page**, **no id → all
+  pages** (`publicController.listOtherPagesPublic`). Seeds defaults on first hit too.
+
+### Website Bookings pagination
+- `GET /api/cms/bookings` now returns `{ rows, total, page, limit, pages }` with `page`/`limit`
+  (default **20**). `client/src/pages/cms/WebsiteBookings.jsx` gained a **Rows-per-page** dropdown
+  (10/20/50/100) + Previous/Next pager + "showing x–y of N"; filters reset to page 1. Only this
+  listing changed. (Stat tiles now show total bookings + paid/value for the current page.)
+
+Verified: `node --check` + route introspection OK; `vite build` OK.
+
+---
+
+## v58.1 — Other Pages description uses the rich-text editor
+
+The project already ships a rich-text editor (`client/src/components/ui/RichText.jsx`, used by the
+Destination/Package/Category CMS pages), so the Other Pages **Description** field now uses that same
+editor instead of a plain textarea (bold/italic/underline/lists/link → stored as HTML). The
+view-detail modal renders the saved HTML. No new dependency added. File:
+`client/src/pages/cms/OtherPages.jsx`. `vite build` OK.
+
+---
+
+## v58.2 — Other Pages: clean text in listing, rendered HTML in view
+
+- Listing **Description** column now shows a clean plain-text preview (robust `stripHtml`: tags removed
+  + common entities decoded + whitespace collapsed) — no raw HTML tags.
+- View-detail modal renders the saved HTML (e.g. `<h2><b>…</b></h2>` shows as a heading), not as raw
+  text. The public API keeps returning the HTML string for the website to render.
+- File: `client/src/pages/cms/OtherPages.jsx`. `vite build` OK.
+
+---
+
+## v59 — Customer profile image, full wishlist detail, booking cancel + bill, public other-pages HTML
+
+### New DB fields
+- **`WebsiteCustomer.customer_profile_image`** — String, default `null`. The customer's profile photo,
+  stored as a relative `/uploads/customers/...` path; returned as an absolute URL by the APIs.
+- **`WebsiteBooking.cancelReason`** (String, default `''`) and **`WebsiteBooking.cancelledAt`** (Date,
+  default `null`) — set when a customer cancels their booking.
+
+(MongoDB is schemaless, so no migration is needed; existing documents read these as their defaults.)
+
+### API changes (all under `/api/public/customer`, website-customer token)
+1. **`GET /api/public/other-pages/:id?`** — `description` is now returned as **plain text** (HTML
+   stripped) so it never shows raw tags; the original markup is still available as **`description_html`**.
+2. **`GET /customer/wishlist`** — now returns the **full package detail** (`package_id` fully
+   populated), not just a few fields.
+3. **`PUT /customer/profile`** — now accepts a **`customer_profile_image`** file upload
+   (multipart/form-data, field name `customer_profile_image`); the old image is replaced/cleaned up.
+   Other fields unchanged.
+4. **`GET /customer/profile`** (and the PUT response) — now return **`customer_profile_image`** as an
+   absolute image URL.
+5. **`POST /customer/bookings/cancel`** — body `{ booking_id, cancel_reason }`. The signed-in customer
+   cancels one of their **own** bookings (scoped by token); sets status `CANCELLED` + reason; idempotent.
+6. **`POST /customer/bookings/bill`** — body `{ booking_id }`. Streams a **PDF bill/receipt**
+   (`<bookingNo>.pdf`) for one of the customer's own bookings (pdfkit; new `utils/bookingBillPdf.js`).
+
+Files: `models/WebsiteCustomer.js`, `models/WebsiteBooking.js`, `utils/bookingBillPdf.js` (new),
+`controllers/websiteCustomerController.js`, `controllers/publicController.js`,
+`routes/websiteCustomerRoutes.js`. Verified: `node --check` + route introspection + `vite build` OK.
+
+---
+
+## v60 — Reports module (Super Admin only)
+
+A new **Reports** area in the Super Admin workspace. The full approved report
+inventory from `travel_erp_26102026.docx` is catalogued verbatim — both
+**Pre Design** and **User Design** design types, every group, sub-group and
+report/sub-report, with names and hierarchy preserved (183 report leaves).
+
+### Access (per instruction)
+> "want report in super admin login only for now … in future we can right user
+>  wise so they can view report according to their rights, but for now add super
+>  admin only"
+
+- Every `/api/reports` endpoint is locked to **SUPER_ADMIN** (`allow(ROLES.SUPER_ADMIN)`).
+- The client menu entry and routes are wrapped in `SAOnly`, and the `reports-hub`
+  menu key is never granted to any other role, so only Super Admin sees it.
+- **Future per-user rights — extension point (already prepared):** each report
+  owns a stable `id`; its permission key is `reports.<id>`. To switch to
+  per-user rights later, replace the blanket role guard in
+  `routes/reportRoutes.js` with `can('reports.'+id,'SELECT')` and seed those
+  keys into the employee permission matrix. The registry, runners, controller
+  and UI are all permission-agnostic — no other layer changes.
+
+### What's live vs planned
+- **37 reports produce live data** from existing Orders / Payments / Invoices /
+  Credit Notes / Supplier Invoices (22 shared runners): Sales (Register / Summary
+  / Detail), Sales Return / Credit Note, Purchase (Register / Summary), Cash Book,
+  Day Book, Account Ledger, Daily Sales / Purchase, Gross Profit (Summary / Detail),
+  Outstanding (Statement / Summary) + Ageing Analysis, Contact Register, Tour
+  (Register / Outstanding), GSTR‑1 B2B. They are tagged **LIVE** in the hub.
+- The remaining catalogued reports are **navigable placeholders** (tagged
+  **PLANNED**) so the complete hierarchy is in place; each opens a "coming soon"
+  view. Wiring one up later is just adding a runner — no structural change.
+
+### Features
+- **From / To date filter** on every report (empty = all records).
+- Table with per-column formatting (money / number / date / status) and a
+  **totals** row.
+- **Single PDF** export per report and **bulk PDF** export (tick several LIVE
+  reports in the hub, set a date range, export them into one PDF). Generic
+  pdfkit renderer in `utils/reportPdf.js`.
+- All runners are **org-scoped** via `scopeToOrg`, matching the rest of the ERP.
+
+### Files
+- New: `server/reports/registry.js` (catalog + per-id keys), `server/reports/runners.js`
+  (live data runners), `server/controllers/reportsController.js`,
+  `server/routes/reportRoutes.js`, `server/utils/reportPdf.js`,
+  `client/src/pages/reports/ReportsHub.jsx`, `client/src/pages/reports/ReportView.jsx`.
+- Changed: `server/server.js` (mount `/api/reports`), `client/src/menuConfig.js`
+  (new `reports` area, SA-only), `client/src/App.jsx` (SA-gated routes).
+- Endpoints: `GET /api/reports` (catalog+stats), `GET /api/reports/:id` (run),
+  `GET /api/reports/:id/pdf` (single PDF), `POST /api/reports/bulk-pdf` (combined PDF).
+
+Verified: `node --check` on all new server files + route introspection +
+`vite build` OK + report PDF builder smoke test OK.
+
+---
+
+## v61 — Reports moved into the sidebar (expandable category menu)
+
+Reports now live **directly in the left sidebar** as expandable category
+submenus, instead of only on the `/app/reports` listing page.
+
+### What changed
+- **New `client/src/components/layout/ReportsNav.jsx`** — rendered in the
+  sidebar whenever the active area is **Reports**. It fetches the same
+  `GET /api/reports` catalog used by the hub (one source of truth for
+  permissions + LIVE/PLANNED status), and renders:
+  - each **category as a collapsible submenu** (grouped by the catalog's groups,
+    with "Pre Design" / "User Design" dividers), reports listed underneath;
+  - an **in-menu search** that filters categories/reports as you type
+    (matches auto-expand);
+  - a LIVE (green) / PLANNED (grey) dot per report and a per-category count;
+  - a **"Bulk export & workspace"** link to `/app/reports`.
+  - Open/closed state persists in `sessionStorage`; the category of the active
+    report auto-expands; existing report names are unchanged.
+- **`client/src/components/layout/Sidebar.jsx`** — one additive branch: when the
+  active area is `reports`, render `<ReportsNav/>`; every other area uses the
+  existing generic section renderer unchanged. The collapsed desktop icon-rail
+  keeps its single Reports icon.
+- **`client/src/pages/reports/ReportsHub.jsx`** — reframed as the **bulk-export
+  workspace** (title + one intro line). Its date-range filters, multi-select and
+  bulk-PDF export are **unchanged** and still work.
+- **`client/src/components/layout/SectionSwitcher.jsx`** — added a Reports (📊)
+  section icon.
+
+### Navigation / permissions
+- Clicking a report in the sidebar goes **straight to `/app/reports/:id`**
+  (existing `ReportView` component + route) — it never bounces through the old
+  listing page.
+- Access is **unchanged**: the Reports area, the `/api/reports` endpoints and the
+  routes remain **Super-Admin only**; the future per-user `reports.<id>` hook is
+  intact. Only reports the catalog returns for the user are shown.
+- Works on desktop (expanded + collapsed rail) and mobile (the drawer auto-closes
+  on navigation).
+
+No backend changes. No reports removed or renamed; report-generation and PDF
+export logic untouched. Verified: `vite build` OK.
+
+---
+
+## v62 — Sales report listings + Booking passenger details
+
+Two scoped changes (other report listings untouched, as instructed).
+
+### Task 1 — Sales report listings (Register / Summary / Detail)
+Rebuilt the three Sales report runners to the client-specified columns, driven by
+real invoice data (no dummy values):
+
+- **Sales — Register** — one row per invoice, **grouped by customer** with a
+  per-customer subtotal and a grand total. Columns: Invoice No, Date, Service,
+  Basic Amount, Tax I, Tax II, Processing, Other, Discount, TDS, TCS, Government
+  Tax, Rounded, Net Amount.
+- **Sales — Summary** — **customer-wise** totals: Customer + the same amount heads.
+- **Sales — Detail** — one row **per passenger**, grouped by customer: Invoice No,
+  Date, Passenger, Ticket No, PNR, Sector, On, + the amount heads. Invoice-level
+  amounts sit on the first row of each invoice so column totals equal the invoice
+  totals (no double counting).
+
+Amount mapping is faithful to the stored invoice: charge heads are read per
+service (`invoiceCalc.js`), **Tax I/Tax II** are that service's two tax heads,
+**Other** absorbs every remaining head (misc taxes, markup, 360 service charge)
+so the breakdown reconciles exactly to the stored Net:
+`Basic+TaxI+TaxII+Processing+Other − Discount − TDS − TCS + Government Tax = Net Amount`.
+**Rounded** is the round-off to the nearest rupee (0 when none; this ERP stores
+no rounding head). Date-range filters, company header and single/bulk PDF export
+are preserved; the PDF renderer now draws customer group headers + subtotals.
+
+Files: `server/reports/runners.js` (salesRegister/salesSummary/salesDetail +
+`chargeHeads`/`serviceLabel` helpers), `server/utils/reportPdf.js` (grouped
+rendering), `client/src/pages/reports/ReportView.jsx` (grouped table + subtotals).
+No route/registry changes — the three report ids and the SA-only gate are unchanged.
+
+### Task 2 — Booking passenger details
+The Passengers section now captures six fields per passenger instead of just a
+name: **Passenger Name, Nationality, Gender, Date of Birth, Passport Number,
+Passport Issue Date**. Add/remove per passenger is preserved; each passenger
+keeps its own values; multiple passengers don't overwrite each other.
+
+- **DB:** extended `passengerSchema` (`models/shared.js`) with `nationality`,
+  `gender` (enum MALE/FEMALE/OTHER/''), `dob`, `passportNumber`,
+  `passportIssueDate` — all **optional** (passport never forced; existing
+  name-only bookings keep working; MongoDB is schemaless so no migration). Date
+  fields have a setter that coerces blank input to `null` (no CastError).
+- **UI:** new reusable `client/src/pages/shared/PassengerFields.jsx`, used by the
+  shared `MultiEntryBookingForm` (retail/B2B single mode) and the retail
+  package-mode passenger block. Name required; DOB/Passport Issue Date are date
+  inputs; responsive grid. Editing a booking reloads and shows saved values.
+
+Verified: `vite build` OK; `node --check` on changed server files; schema
+validation test (blank + filled dates) passes; charge-head breakdown reconciles
+to Net; grouped PDF renders.

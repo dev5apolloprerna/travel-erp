@@ -8,6 +8,8 @@ import CustomizeTrip from '../models/CustomizeTrip.js';
 import OurTeam from '../models/OurTeam.js';
 import Banner from '../models/Banner.js';
 import VideoGallery from '../models/VideoGallery.js';
+import Wishlist from '../models/Wishlist.js';
+import OtherPage from '../models/OtherPage.js';
 import { sendMail } from '../utils/mailer.js';
 
 /**
@@ -345,6 +347,29 @@ export const listVideosPublic = async (req, res) => {
   })));
 };
 
+// GET /api/public/other-pages        -> all static pages
+// GET /api/public/other-pages/:id     -> one page (or ?id=). No id => all (v58).
+export const listOtherPagesPublic = async (req, res) => {
+  await OtherPage.seedDefaults();
+  // `description` is returned as PLAIN TEXT (HTML stripped) so it never shows raw tags (v59); the
+  // original markup is still available as `description_html` for consumers that render HTML.
+  const shape = (r) => ({
+    id: r._id,
+    pagename: r.pagename,
+    description: htmlToText(r.description || ''),
+    description_html: r.description || '',
+  });
+
+  const id = req.params.id || req.query.id;
+  if (id) {
+    const row = await OtherPage.findById(id).catch(() => null);
+    if (!row) return res.status(404).json({ message: 'Page not found' });
+    return res.json(shape(row));
+  }
+  const rows = await OtherPage.find().sort({ createdAt: 1 }).lean();
+  res.json(rows.map(shape));
+};
+
 // GET /api/public/our-team   -> active team members, newest first
 export const listOurTeamPublic = async (req, res) => {
   const rows = await OurTeam.find().sort({ createdAt: -1 }).lean();
@@ -354,5 +379,18 @@ export const listOurTeamPublic = async (req, res) => {
   })));
 };
 
-// v50 (Task 3): storeWishlist (POST /api/public/wishlist) was removed on request. The Wishlist
-// model/collection is intentionally kept so existing data and any internal use remain intact.
+// POST /api/public/wishlist   body: { websitecustomer_id, package_id }
+export const storeWishlist = async (req, res) => {
+  const { websitecustomer_id, package_id } = req.body || {};
+  if (!websitecustomer_id || !package_id)
+    return res.status(400).json({ message: 'websitecustomer_id and package_id are required.' });
+  try {
+    const existing = await Wishlist.findOne({ websitecustomer_id, package_id });
+    if (existing) return res.status(200).json({ message: 'Already in wishlist.', id: existing._id, duplicate: true });
+    const row = await Wishlist.create({ websitecustomer_id, package_id });
+    res.status(201).json({ message: 'Added to wishlist.', id: row._id });
+  } catch (err) {
+    if (err?.code === 11000) return res.status(200).json({ message: 'Already in wishlist.', duplicate: true });
+    res.status(400).json({ message: 'Could not add to wishlist.' });
+  }
+};

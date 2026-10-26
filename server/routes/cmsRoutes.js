@@ -72,6 +72,11 @@ r.post('/videos', can('cms-videos', 'CREATE'), wm.createVideo);
 r.put('/videos/:id', can('cms-videos', 'EDIT'), wm.updateVideo);
 r.delete('/videos/:id', can('cms-videos', 'DELETE'), wm.deleteVideo);
 
+// ---- Other Pages (v58) — list / view / edit only ----
+r.get('/other-pages', wm.listOtherPages);
+r.get('/other-pages/:id', wm.getOtherPage);
+r.put('/other-pages/:id', can('cms-other-pages', 'EDIT'), wm.updateOtherPage);
+
 r.get('/team', wm.listTeam);
 r.post('/team', can('cms-team', 'CREATE'), wm.createTeam);
 r.put('/team/:id', can('cms-team', 'EDIT'), wm.updateTeam);
