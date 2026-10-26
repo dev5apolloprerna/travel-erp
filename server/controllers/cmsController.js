@@ -2,6 +2,7 @@ import { DestinationCategory, Destination } from '../models/Destination.js';
 import TourPackage from '../models/TourPackage.js';
 import { Faq, Testimonial } from '../models/Content.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
+import { logActivity } from '../utils/activityLog.js';
 
 /**
  * Admin-side CMS for the public website:
@@ -22,14 +23,18 @@ export const listCategories = async (req, res) => {
   res.json(rows);
 };
 
-export const createCategory = async (req, res) =>
-  res.status(201).json(await DestinationCategory.create(req.body));
+export const createCategory = async (req, res) => {
+  const row = await DestinationCategory.create(req.body);
+  await logActivity(req, { action: 'CREATE', module: 'DestinationCategory', recordId: row._id, recordLabel: row.name, message: 'Category created' });
+  res.status(201).json(row);
+};
 
 export const updateCategory = async (req, res) => {
   const row = await DestinationCategory.findById(req.params.id);
   if (!row) return res.status(404).json({ message: 'Category not found' });
   Object.assign(row, req.body);
   await row.save();
+  await logActivity(req, { action: 'UPDATE', module: 'DestinationCategory', recordId: row._id, recordLabel: row.name, message: 'Category updated' });
   res.json(row);
 };
 
@@ -40,7 +45,9 @@ export const deleteCategory = async (req, res) => {
       message: `This category has ${inUse} destination(s). Delete or move them first.`,
     });
   }
+  const existing = await DestinationCategory.findById(req.params.id);
   await DestinationCategory.findByIdAndDelete(req.params.id);
+  if (existing) await logActivity(req, { action: 'DELETE', module: 'DestinationCategory', recordId: existing._id, recordLabel: existing.name, message: 'Category deleted' });
   res.json({ message: 'Category deleted' });
 };
 
@@ -80,7 +87,9 @@ export const getDestination = async (req, res) => {
 export const createDestination = async (req, res) => {
   const payload = destinationPayload(req.body);
   if (payload.sliderImages === undefined) delete payload.sliderImages;
-  res.status(201).json(await Destination.create(payload));
+  const row = await Destination.create(payload);
+  await logActivity(req, { action: 'CREATE', module: 'Destination', recordId: row._id, recordLabel: row.name, message: 'Destination created' });
+  res.status(201).json(row);
 };
 
 export const updateDestination = async (req, res) => {
@@ -90,6 +99,7 @@ export const updateDestination = async (req, res) => {
   if (payload.sliderImages === undefined) delete payload.sliderImages;
   Object.assign(row, payload);
   await row.save();
+  await logActivity(req, { action: 'UPDATE', module: 'Destination', recordId: row._id, recordLabel: row.name, message: 'Destination updated' });
   res.json(row);
 };
 
@@ -99,6 +109,7 @@ export const deleteDestination = async (req, res) => {
     removeFile(row.bannerImage);
     (row.sliderImages || []).forEach(removeFile);
     await row.deleteOne();
+    await logActivity(req, { action: 'DELETE', module: 'Destination', recordId: row._id, recordLabel: row.name, message: 'Destination deleted' });
   }
   res.json({ message: 'Destination deleted' });
 };
@@ -144,7 +155,9 @@ export const getPackage = async (req, res) => {
 export const createPackage = async (req, res) => {
   const payload = packagePayload(req.body);
   Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
-  res.status(201).json(await TourPackage.create(payload));
+  const row = await TourPackage.create(payload);
+  await logActivity(req, { action: 'CREATE', module: 'TourPackage', recordId: row._id, recordLabel: row.name, message: 'Package created' });
+  res.status(201).json(row);
 };
 
 export const updatePackage = async (req, res) => {
@@ -154,6 +167,7 @@ export const updatePackage = async (req, res) => {
   Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
   Object.assign(row, payload);
   await row.save();
+  await logActivity(req, { action: 'UPDATE', module: 'TourPackage', recordId: row._id, recordLabel: row.name, message: 'Package updated' });
   res.json(row);
 };
 
@@ -163,6 +177,7 @@ export const deletePackage = async (req, res) => {
     removeFile(row.bannerImage);
     (row.images || []).forEach(removeFile);
     await row.deleteOne();
+    await logActivity(req, { action: 'DELETE', module: 'TourPackage', recordId: row._id, recordLabel: row.name, message: 'Package deleted' });
   }
   res.json({ message: 'Package deleted' });
 };
@@ -171,16 +186,23 @@ export const deletePackage = async (req, res) => {
 export const listFaqs = async (req, res) =>
   res.json(await Faq.find().sort({ category: 1, displayOrder: 1 }));
 
-export const createFaq = async (req, res) => res.status(201).json(await Faq.create(req.body));
+export const createFaq = async (req, res) => {
+  const row = await Faq.create(req.body);
+  await logActivity(req, { action: 'CREATE', module: 'FAQ', recordId: row._id, recordLabel: row.question, message: 'FAQ created' });
+  res.status(201).json(row);
+};
 
 export const updateFaq = async (req, res) => {
   const row = await Faq.findByIdAndUpdate(req.params.id, req.body, { new: true });
   if (!row) return res.status(404).json({ message: 'FAQ not found' });
+  await logActivity(req, { action: 'UPDATE', module: 'FAQ', recordId: row._id, recordLabel: row.question, message: 'FAQ updated' });
   res.json(row);
 };
 
 export const deleteFaq = async (req, res) => {
+  const existing = await Faq.findById(req.params.id);
   await Faq.findByIdAndDelete(req.params.id);
+  if (existing) await logActivity(req, { action: 'DELETE', module: 'FAQ', recordId: existing._id, recordLabel: existing.question, message: 'FAQ deleted' });
   res.json({ message: 'FAQ deleted' });
 };
 
@@ -188,12 +210,16 @@ export const deleteFaq = async (req, res) => {
 export const listTestimonials = async (req, res) =>
   res.json(await Testimonial.find().populate('packageId', 'name').sort({ displayOrder: 1, createdAt: -1 }));
 
-export const createTestimonial = async (req, res) =>
-  res.status(201).json(await Testimonial.create(req.body));
+export const createTestimonial = async (req, res) => {
+  const row = await Testimonial.create(req.body);
+  await logActivity(req, { action: 'CREATE', module: 'Testimonial', recordId: row._id, recordLabel: row.name, message: 'Testimonial created' });
+  res.status(201).json(row);
+};
 
 export const updateTestimonial = async (req, res) => {
   const row = await Testimonial.findByIdAndUpdate(req.params.id, req.body, { new: true });
   if (!row) return res.status(404).json({ message: 'Testimonial not found' });
+  await logActivity(req, { action: 'UPDATE', module: 'Testimonial', recordId: row._id, recordLabel: row.name, message: 'Testimonial updated' });
   res.json(row);
 };
 
@@ -202,6 +228,7 @@ export const deleteTestimonial = async (req, res) => {
   if (row) {
     removeFile(row.photo);
     await row.deleteOne();
+    await logActivity(req, { action: 'DELETE', module: 'Testimonial', recordId: row._id, recordLabel: row.name, message: 'Testimonial deleted' });
   }
   res.json({ message: 'Testimonial deleted' });
 };

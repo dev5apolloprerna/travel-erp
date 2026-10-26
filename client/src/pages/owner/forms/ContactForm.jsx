@@ -4,6 +4,7 @@ import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { Tabs } from '../../../components/ui';
 import { FieldsGrid, DetailGrid } from './formHelpers';
+import { useMasterBase } from '../useMasterBase';
 
 // Contact Add/Edit — three tabs (requirement #4): Personal / Family / Employee.
 // Personal uses the existing `contactHead` master. Family & Employee are repeatable
@@ -46,7 +47,8 @@ export default function ContactForm() {
   useEffect(() => { if (editing) api.get(`/owner/masters/contactHead/${id}`).then((r) => setForm(r.data)); }, [id, editing]);
 
   const setField = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
-  const backToList = () => nav('/owner/contactHead');
+  const base = useMasterBase();
+  const backToList = () => nav(`${base}/contactHead`);
 
   // Save the head (Personal). On first create, stay on the page in edit mode so the
   // Family / Employee grids become usable against the new record.
@@ -60,7 +62,7 @@ export default function ContactForm() {
       } else {
         const r = await api.post('/owner/masters/contactHead', form);
         if (stay && r.data?._id) {
-          nav(`/owner/contactHead/${r.data._id}/edit`, { replace: true });
+          nav(`${base}/contactHead/${r.data._id}/edit`, { replace: true });
           setNotice('Contact created. You can now add family and employee records.');
         } else backToList();
       }

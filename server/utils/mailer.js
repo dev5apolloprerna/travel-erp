@@ -7,13 +7,24 @@ import Settings from '../models/Settings.js';
  */
 export const getTransporter = async () => {
   const s = await Settings.getSettings();
-  if (!s.smtpHost || !s.smtpUser) return null;
+
+  // Prefer the SMTP saved in Company Profile Settings; fall back to environment variables so a
+  // deployment can configure mail without the UI (common cause of "no email sent" — Settings SMTP
+  // was never filled in). Nothing is hardcoded; env is only a fallback.
+  const host = s.smtpHost || process.env.SMTP_HOST || process.env.MAIL_HOST;
+  const user = s.smtpUser || process.env.SMTP_USER || process.env.MAIL_USERNAME;
+  const pass = s.smtpPassword || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASSWORD;
+  const port = Number(s.smtpPort || process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
+  const secure = s.smtpHost ? !!s.smtpSecure
+    : /^(1|true|ssl)$/i.test(String(process.env.SMTP_SECURE ?? (port === 465 ? 'true' : 'false')));
+
+  if (!host || !user) return null;   // genuinely not configured anywhere
 
   return nodemailer.createTransport({
-    host: s.smtpHost,
-    port: s.smtpPort || 587,
-    secure: !!s.smtpSecure,           // true for 465, false for 587/25
-    auth: { user: s.smtpUser, pass: s.smtpPassword },
+    host,
+    port,
+    secure,                 // true for 465, false for 587/25
+    auth: { user, pass },
   });
 };
 
@@ -29,9 +40,10 @@ export const sendMail = async ({ to, subject, html, text, attachments = [] }) =>
       return { sent: false, error: 'SMTP not configured. Add it in Settings → Company Profile.' };
     }
 
-    const from = s.smtpFromEmail
-      ? `"${s.smtpFromName || s.companyName}" <${s.smtpFromEmail}>`
-      : `"${s.smtpFromName || s.companyName}" <${s.smtpUser}>`;
+    const fromEmail = s.smtpFromEmail || process.env.SMTP_FROM || process.env.MAIL_FROM_ADDRESS
+      || s.smtpUser || process.env.SMTP_USER || process.env.MAIL_USERNAME;
+    const fromName = s.smtpFromName || process.env.SMTP_FROM_NAME || s.companyName || 'Travel ERP';
+    const from = `"${fromName}" <${fromEmail}>`;
 
     const info = await transporter.sendMail({ from, to, subject, text, html, attachments });
     return { sent: true, messageId: info.messageId };
