@@ -227,12 +227,52 @@ const run = async () => {
   await OrderM.updateMany({ organizationId: { $in: [null, undefined] } }, { $set: { organizationId: org360._id } });
   await CompanyM.updateMany({ organizationId: { $in: [null, undefined] } }, { $set: { organizationId: org360._id } });
 
+  // --- v39 website masters + public tables (non-destructive: sample rows only when empty) ---
+  const { default: Banner } = await import('../models/Banner.js');
+  const { default: VideoGallery } = await import('../models/VideoGallery.js');
+  const { default: OurTeam } = await import('../models/OurTeam.js');
+  const { default: TravelInspiration } = await import('../models/TravelInspiration.js');
+  const { default: CustomizeTrip } = await import('../models/CustomizeTrip.js');
+  const { default: WebsiteCustomer } = await import('../models/WebsiteCustomer.js');
+  // Wishlist has no sample row (needs a real customer + package); its collection is created on first use.
+  await import('../models/Wishlist.js');
+
+  if ((await Banner.estimatedDocumentCount()) === 0) {
+    await Banner.create([
+      { title: 'Summer Escapes', bannerImage: '' },
+      { title: 'Winter Getaways', bannerImage: '' },
+    ]);
+  }
+  if ((await VideoGallery.estimatedDocumentCount()) === 0) {
+    await VideoGallery.create([
+      { title: 'Welcome to 360 Travel', description: 'Our story', video_url_link: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+    ]);
+  }
+  if ((await OurTeam.estimatedDocumentCount()) === 0) {
+    await OurTeam.create([
+      { name: 'Aarav Shah', designation: 'Founder & CEO', department: 'Management', flag: 'first', photo: '' },
+      { name: 'Isha Patel', designation: 'Head of Operations', department: 'Operations', flag: 'second', photo: '' },
+    ]);
+  }
+  if ((await TravelInspiration.estimatedDocumentCount()) === 0) {
+    await TravelInspiration.create([{ email: 'inspire.me@example.com' }]);
+  }
+  if ((await CustomizeTrip.estimatedDocumentCount()) === 0) {
+    await CustomizeTrip.create([{ name: 'Sample Visitor', email: 'visitor@example.com', PreferredDestination: 'Goa', number_of_days: '5', Trip_Type: 'Leisure' }]);
+  }
+  if (!(await WebsiteCustomer.findOne({ email: 'webuser@example.com' }))) {
+    const wc = new WebsiteCustomer({ name: 'Web User', mobile: '9800000099', email: 'webuser@example.com' });
+    await wc.setPassword('webuser123');
+    await wc.save();
+  }
+
   console.log('\nSeed complete (existing data preserved). Login accounts:');
   console.log('  Super Admin  -> admin@travel.com / admin123');
   console.log('  Employee     -> employee@travel.com / emp123');
   console.log('  Retail Cust  -> rahul@mail.com / cust123');
   console.log('  B2B Member   -> karan@nexora.com / member123');
   console.log('  Company Owner-> owner@travel.com / owner123');
+  console.log('  Website Cust -> webuser@example.com / webuser123 (public site)');
   console.log(`\nMaster collections seeded: ${mastersCreated} (of 80) | v13 collections ensured: ${v13Created}`);
   console.log('Note: existing accounts keep their current passwords (seeder never overwrites them).');
 

@@ -16,6 +16,9 @@ const websiteCustomerSchema = new mongoose.Schema(
     state: { type: String, default: '' },
     country: { type: String, default: '' },
 
+    // Profile photo — uploaded via the profile-update API (v59). Stored as a relative /uploads path.
+    customer_profile_image: { type: String, default: null },
+
     // Password reset / account-setup
     resetToken: { type: String, default: null },
     resetExpires: { type: Date, default: null },
@@ -37,6 +40,7 @@ websiteCustomerSchema.methods.toPublic = function () {
   return {
     id: this._id, name: this.name, mobile: this.mobile, email: this.email,
     address: this.address, city: this.city, state: this.state, country: this.country,
+    customer_profile_image: this.customer_profile_image || null,   // relative path; absolutized by the controller
     isActive: this.isActive, createdAt: this.createdAt,
   };
 };

@@ -57,6 +57,8 @@ export const createPayment = async (booking) => {
         // Public key — safe to hand to the browser
         keyId: settings.razorpayKeyId,
         bookingNo: booking.bookingNo,
+        // Razorpay callback URL for payment verification (set SITE_PAYMENT_CALLBACK_URL in .env)
+        callback_url: process.env.SITE_PAYMENT_CALLBACK_URL,
       };
     } catch (err) {
       return { ok: false, error: err?.error?.description || err.message || 'Razorpay order could not be created.' };

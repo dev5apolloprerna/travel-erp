@@ -5,7 +5,11 @@ import { PageHeader, Card } from '../../components/ui';
 
 export default function OwnerDashboard() {
   const [masters, setMasters] = useState([]);
-  useEffect(() => { api.get('/owner/masters').then((r) => setMasters(r.data)); }, []);
+  const [counts, setCounts] = useState({});   // { key: totalRecords } — req #4
+  useEffect(() => {
+    api.get('/owner/masters').then((r) => setMasters(r.data));
+    api.get('/owner/masters/counts').then((r) => setCounts(r.data || {})).catch(() => setCounts({}));
+  }, []);
 
   // Order & Invoices and Employees are reached from the Company menu in the sidebar, not from
   // dashboard buttons (req #1/#2), so the operational (virtual) entries are left out of the cards.
@@ -21,8 +25,9 @@ export default function OwnerDashboard() {
           <Card key={menu} title={menu}>
             <div className="space-y-1">
               {items.map((m) => (
-                <Link key={m.key} to={`/owner/${m.key}`} className="block rounded-lg px-2 py-1.5 text-sm text-ink-soft hover:bg-canvas hover:text-brand">
-                  {m.label}
+                <Link key={m.key} to={`/owner/${m.key}`} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft hover:bg-canvas hover:text-brand">
+                  <span>{m.label}</span>
+                  <span className="shrink-0 rounded-full bg-faint px-2 py-0.5 text-[11px] font-bold text-ink-muted">{counts[m.key] ?? 0}</span>
                 </Link>
               ))}
             </div>

@@ -24,10 +24,20 @@ export function AuthProvider({ children }) {
     const res = await api.post('/auth/login', { email, password, expectedRole });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
+    // Flag a one-time Switch-Section popup for the /app shell (Super Admin / Employee). Consumed
+    // once by AppLayout so it shows after login but not on refresh (req #2). Company Owner uses a
+    // separate shell and is unaffected.
+    try {
+      if (['SUPER_ADMIN', 'EMPLOYEE'].includes(res.data.user?.role)) {
+        sessionStorage.setItem('postLoginSwitch', '1');
+      }
+    } catch { /* storage unavailable — popup simply won't auto-open */ }
     return res.data.user;
   };
 
   const logout = () => {
+    // Record the sign-out (best effort) before the token is cleared. Never block logout on it.
+    api.post('/auth/logout').catch(() => {});
     sessionStorage.removeItem(IMP_KEY);
     setImpersonating(false);
     localStorage.removeItem('token');
@@ -57,8 +67,25 @@ export function AuthProvider({ children }) {
     return res.data.user;
   };
 
+  // req #4: per-menu action permission check for the UI. MUST mirror the backend
+  // (middleware `hasPermission`) exactly so a hidden control is also a blocked request:
+  //   - SUPER_ADMIN and legacy 'ALL' users: full access.
+  //   - COMPANY_OWNER: broad access but never DELETE.
+  //   - EMPLOYEE: governed by the stored `permissions` matrix; a legacy employee that only has
+  //     the old `menus` list falls back to full access on a granted menu.
+  const can = (menuKey, action) => {
+    if (!user) return false;
+    if (user.role === 'SUPER_ADMIN') return true;
+    if ((user.menus || []).includes('ALL')) return true;
+    if (user.role === 'COMPANY_OWNER') return action !== 'DELETE';
+    const perms = user.permissions && typeof user.permissions === 'object' ? user.permissions : null;
+    if (perms && Array.isArray(perms[menuKey])) return perms[menuKey].includes(action);
+    if ((user.menus || []).includes(menuKey)) return true; // legacy: menu implied full rights
+    return false;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, login, logout, loginAsOwner, returnToAdmin, impersonating }}>
+    <AuthContext.Provider value={{ user, setUser, loading, login, logout, loginAsOwner, returnToAdmin, impersonating, can }}>
       {children}
     </AuthContext.Provider>
   );

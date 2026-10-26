@@ -3,7 +3,33 @@ import VideoGallery from '../models/VideoGallery.js';
 import OurTeam from '../models/OurTeam.js';
 import TravelInspiration from '../models/TravelInspiration.js';
 import CustomizeTrip from '../models/CustomizeTrip.js';
+import OtherPage from '../models/OtherPage.js';
 import { logActivity } from '../utils/activityLog.js';
+
+/* ============================ OTHER PAGES (v58) ============================ */
+// Static website pages (Privacy Policy, Terms, etc.). Admin can LIST / VIEW / EDIT only
+// (no create or delete). The four defaults are seeded once if the collection is empty.
+export const listOtherPages = async (req, res) => {
+  await OtherPage.seedDefaults();
+  res.json(await OtherPage.find().sort({ createdAt: 1 }));
+};
+export const getOtherPage = async (req, res) => {
+  const row = await OtherPage.findById(req.params.id);
+  if (!row) return res.status(404).json({ message: 'Page not found' });
+  res.json(row);
+};
+export const updateOtherPage = async (req, res) => {
+  const row = await OtherPage.findById(req.params.id);
+  if (!row) return res.status(404).json({ message: 'Page not found' });
+  if (req.body.pagename !== undefined) {
+    if (!String(req.body.pagename).trim()) return res.status(400).json({ message: 'Page name is required.' });
+    row.pagename = String(req.body.pagename).trim();
+  }
+  if (req.body.description !== undefined) row.description = req.body.description;
+  await row.save();
+  await logActivity(req, { action: 'UPDATE', module: 'OtherPage', recordId: row._id, recordLabel: row.pagename, message: 'Other page updated' });
+  res.json(row);
+};
 
 /* ============================ BANNER MASTER ============================ */
 export const listBanners = async (req, res) => res.json(await Banner.find().sort({ createdAt: -1 }));

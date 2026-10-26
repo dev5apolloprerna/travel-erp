@@ -5,7 +5,10 @@
 // field: [key, label, type?, options?]
 // type defaults to 'text'. Supported: text, date, number, select, checkbox
 const FLIGHT = [
-  ['airline', 'Airline'],
+  // Airline: searchable autocomplete over ALL Account records (me_account) — server-side search,
+  // no category filter (req #1). Stores the name so it prints on the invoice as before.
+  ['airline', 'Airline', 'msearch', 'account'],
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['fromStock', 'From Stock?', 'select', ['', 'Yes', 'No']],
   ['pnrFrom', 'PNR From?', 'mref', 'cRS'],
   ['ticketNo', 'Ticket No.'],
@@ -39,7 +42,8 @@ const RAILWAY = [
 
 // Bus — same layout as railway, worded for buses.
 const BUS = [
-  ['bus', 'Bus'],
+  // Bus: searchable autocomplete over ALL Account records (me_account) — req #2.
+  ['bus', 'Bus', 'msearch', 'account'],
   ['busType', 'Bus Type', 'mref', 'busType'],
   ['status', 'Status', 'select', ['Confirm', 'RAC', 'Waitlist', 'Tatkal']],
   ['ticketNo', 'Ticket No.'],
@@ -56,6 +60,7 @@ const BUS = [
 
 // Event — its own simple form.
 const EVENT = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['eventTitle', 'Event Title'],
   ['eventDescription', 'Event Description'],
   ['country', 'Country'],
@@ -64,6 +69,7 @@ const EVENT = [
 
 // Visa — four fields.
 const VISA = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['visaCountry', 'Visa Country'],
   ['visaType', 'Visa Type', 'select', ['New', 'Renewal']],
   ['visaYears', 'Visa Years'],
@@ -72,6 +78,7 @@ const VISA = [
 
 // Cab — based on the ePrompt Transport Voucher (booking details only; amounts move to invoice).
 const CAB = [
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
   ['serviceProvider', 'Service Provider'],
   ['guestName', 'Name of Guest'],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
@@ -102,7 +109,9 @@ const CAB = [
 
 // Hotel has a repeatable room-row section handled specially in the form component.
 const HOTEL = [
-  ['hotelName', 'Hotel Name', 'mname', 'property'],
+  ['pnrPoNumber', 'PNR / Purchase Order Unique No.'],
+  // Hotel: searchable autocomplete over ALL Account records (me_account) — req #3.
+  ['hotelName', 'Hotel Name', 'msearch', 'account'],
   ['forPackageInvoice', 'For Package Invoice?', 'select', ['', 'Yes', 'No']],
   ['adults', 'Adults', 'number'],
   ['children', 'Children', 'number'],

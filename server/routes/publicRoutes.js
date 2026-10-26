@@ -30,5 +30,15 @@ r.post('/inquiry', p.createInquiry);
 // Booking + payment
 r.post('/bookings', wb.createBooking);
 r.post('/bookings/:id/confirm', wb.confirmPayment);
+r.post('/bookings/:id/fail', wb.markPaymentFailed);   // v51: record a failed/cancelled payment
+
+// v39 public store endpoints
+r.post('/travel-inspiration', p.storeTravelInspiration);
+r.post('/customize-trip', p.storeCustomizeTrip);
+r.get('/our-team', p.listOurTeamPublic);
+r.get('/banners', p.listBannersPublic);
+r.get('/video-gallery', p.listVideosPublic);
+r.get('/other-pages/:id?', p.listOtherPagesPublic);   // v58: id => one, no id => all
+r.post('/wishlist', p.storeWishlist);   // v51: restored
 
 export default r;

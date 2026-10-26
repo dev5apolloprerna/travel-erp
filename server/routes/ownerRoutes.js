@@ -16,6 +16,7 @@ r.use(protect, allow(ROLES.COMPANY_OWNER, ROLES.SUPER_ADMIN));
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 r.get('/masters', m.catalog);
+r.get('/masters/counts', m.counts);          // batched record counts (must precede /masters/:key)
 r.get('/masters/:key/def', m.definition);
 r.get('/masters/:key/options', m.options);
 r.get('/masters/:key/sample', sampleExcel);                 // download per-master sample (#11)

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  login, me, createEmployee, updateEmployee, deleteEmployee, listEmployees, getEmployee,
+  login, logout, me, createEmployee, updateEmployee, deleteEmployee, listEmployees, getEmployee,
   changePassword, resetUserPassword, toggleActive, uploadProfilePic, removeProfilePic,
   listCompanyOwners, getCompanyOwner, createCompanyOwner, updateCompanyOwner, deleteCompanyOwner,
   loginAsCompanyOwner,
@@ -14,6 +14,7 @@ const staff = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_OWNER);
 const superAdmin = allow(ROLES.SUPER_ADMIN);
 
 r.post('/login', login);
+r.post('/logout', protect, logout);
 r.get('/me', protect, me);
 
 // Change own password — available to ALL roles (Admin, Employee, Retail, B2B)

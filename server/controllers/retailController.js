@@ -9,6 +9,8 @@ import Settings from '../models/Settings.js';
 // GST no longer applied at order time — tax is entered at invoice generation
 import { publicUrl, removeFile } from '../utils/upload.js';
 import { sendCredentialsMail } from '../utils/mailer.js';
+import { logActivity, diffFields } from '../utils/activityLog.js';
+import { ensureCreditNoteForOrder } from '../services/creditNoteService.js';
 
 const genPassword = () => Math.random().toString(36).slice(-8);
 
@@ -28,8 +30,18 @@ export const getCustomer = async (req, res) => {
 };
 
 export const createCustomer = async (req, res) => {
-  const { name, mobile, email, city, state, stateCode, gstNumber, address } = req.body;
+  const { name, mobile, city, state, stateCode, gstNumber, address } = req.body;
+  // req #3: normalise the email (trim + lowercase) and reject a duplicate within the same org
+  // (customer uniqueness is per-tenant/org, matching the existing org-scoped data model).
+  const email = (req.body.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ message: 'Email is required.' });
   const orgId = await resolveOrgId(req);
+  const dupFilter = { email: new RegExp(`^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') };
+  if (orgId) dupFilter.organizationId = orgId;
+  const existingCustomer = await Customer.findOne(dupFilter);
+  if (existingCustomer)
+    return res.status(400).json({ message: 'A customer with this email already exists.' });
+
   const customer = await Customer.create({
     name, mobile, email, city, state, stateCode, gstNumber, address, createdBy: req.user._id, organizationId: orgId,
   });
@@ -53,6 +65,8 @@ export const createCustomer = async (req, res) => {
   }
   await portalUser.setPassword(tempPass);
   await portalUser.save();
+
+  await logActivity(req, { action: 'CREATE', module: 'Customer', recordId: customer._id, recordLabel: customer.name, message: 'Customer created' });
 
   const loginUrl = `${process.env.CLIENT_URL}/login/retail`;
   // Try to actually email the credentials (falls back gracefully if SMTP isn't set up yet)
@@ -147,18 +161,44 @@ const buildOrderServices = async (services = [], selectedType) => {
   return { services: resolved, invoiceType };
 };
 
+// Validate a package booking server-side (req #3): it must contain at least two services, and
+// every line must reference a real, active service. Prices/totals are never taken from the client.
+const validatePackage = async (services = []) => {
+  if (!Array.isArray(services) || services.length < 2)
+    return 'A package must contain at least two services.';
+  for (const line of services) {
+    if (!line.serviceRef) return 'Every package service must be selected from the Service Master.';
+    const master = await Service.findById(line.serviceRef);
+    if (!master || master.isActive === false) return 'One of the selected services is invalid or inactive.';
+    // req #2: Flight is not allowed inside a package booking.
+    if ((master.name || '').toUpperCase() === 'FLIGHT') return 'Flight booking is not available within a package.';
+  }
+  return null;
+};
+
 export const createOrder = async (req, res) => {
-  const { customerId, services, invoiceType } = req.body;
+  const { customerId, services, invoiceType, isPackage } = req.body;
+  if (!customerId) return res.status(400).json({ message: 'Please select a customer.' });
+
+  if (isPackage) {
+    const err = await validatePackage(services);
+    if (err) return res.status(400).json({ message: err });
+  }
 
   const t = await buildOrderServices(services || [], invoiceType);
 
   const orgId = await resolveOrgId(req);
   const order = await Order.create({
     module: 'RETAIL', customerId,
+    isPackage: !!isPackage,
     services: t.services,
     invoiceType: t.invoiceType,
     createdBy: req.user._id,
     organizationId: orgId,
+  });
+  await logActivity(req, {
+    action: 'CREATE', module: 'Order', recordId: order._id, recordLabel: order.orderNo,
+    message: `${isPackage ? 'Package order' : 'Order'} created with ${order.services?.length || 0} service(s)`,
   });
   res.status(201).json(order);
 };
@@ -173,18 +213,62 @@ export const updateOrder = async (req, res) => {
     return res.status(400).json({ message: 'This order cannot be edited because its invoice has already been generated.' });
   if (order.cancelled)
     return res.status(400).json({ message: 'This order has been cancelled and can no longer be edited.' });
-  const { services, invoiceType } = req.body;
+  const { services, invoiceType, isPackage } = req.body;
+  const wantPackage = isPackage === undefined ? order.isPackage : !!isPackage;
+  if (services && wantPackage) {
+    const err = await validatePackage(services);
+    if (err) return res.status(400).json({ message: err });
+  }
   if (services) {
     const t = await buildOrderServices(services, invoiceType || order.invoiceType);
     order.services = t.services;
     order.invoiceType = t.invoiceType;
   }
+  if (isPackage !== undefined) order.isPackage = !!isPackage;
   await order.save(); // pre-save recomputes status
+  await logActivity(req, { action: 'UPDATE', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order updated' });
   res.json(order);
 };
 
-// req #2: cancellation is only allowed AFTER the invoice has been generated. Validated
-// on the actual order/invoice state (not just UI), so a direct request cannot bypass it.
+// req #1: put an order ON HOLD (a pre-invoice working state). Only valid before an invoice
+// exists and while the order is not cancelled. A held order cannot be invoiced until released.
+export const holdOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  if (order.invoiceGenerated)
+    return res.status(400).json({ message: 'An order with a generated invoice cannot be put on hold.' });
+  if (order.cancelled)
+    return res.status(400).json({ message: 'A cancelled order cannot be put on hold.' });
+  if (order.onHold)
+    return res.status(400).json({ message: 'This order is already on hold.' });
+  order.onHold = true;
+  order.heldAt = new Date();
+  order.holdReason = (req.body?.reason || '').toString().trim();
+  await order.save();
+  await logActivity(req, { action: 'HOLD', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order put on hold', meta: { reason: order.holdReason } });
+  res.json(order);
+};
+
+// req #1: release an order from hold back to the normal (Open) flow.
+export const releaseOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  if (!order.onHold)
+    return res.status(400).json({ message: 'This order is not on hold.' });
+  order.onHold = false;
+  order.heldAt = null;
+  order.holdReason = '';
+  await order.save();
+  await logActivity(req, { action: 'RELEASE', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order released from hold' });
+  res.json(order);
+};
+
+// Order cancellation (Booking → Order). The existing rule stands: an order is only cancellable
+// AFTER its invoice has been generated (before that, orders are edited/deleted, not cancelled) —
+// validated on the actual state so a direct request can't bypass it.
+// v46 (req #2/#3): cancelling an INVOICED order now also raises the credit note, through the SAME
+// shared service the Invoice screen uses. Scenario A (no invoice) raises none; Scenario C (already
+// cancelled / credit note already present) is idempotent — no duplicate note, no repeated work.
 export const cancelOrder = async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
@@ -192,11 +276,28 @@ export const cancelOrder = async (req, res) => {
     return res.status(400).json({ message: 'An order can only be cancelled after its invoice has been generated.' });
   if (order.cancelled)
     return res.status(400).json({ message: 'This order is already cancelled.' });
-  order.cancelled = true;
-  order.cancelledAt = new Date();
-  order.cancelReason = (req.body?.reason || '').toString().trim();
-  await order.save();
-  res.json(order);
+
+  const reason = (req.body?.reason || '').toString().trim();
+  try {
+    // Raise/link the credit note FIRST (Scenario B). If it fails, the order is NOT saved, so we
+    // never leave an order cancelled without its required credit note.
+    const result = await ensureCreditNoteForOrder(order, { user: req.user, reason });
+
+    order.cancelled = true;
+    order.cancelledAt = new Date();
+    order.cancelReason = reason;
+    await order.save();   // one write persists both the cancel flags and the credit-note link
+
+    await logActivity(req, { action: 'CANCEL', module: 'Order', recordId: order._id, recordLabel: order.orderNo, message: 'Order cancelled', meta: { reason, creditNoteNo: result.creditNote?.creditNoteNo || null } });
+    if (result.status === 'created') {
+      await logActivity(req, { action: 'INVOICE_CANCEL', module: 'Invoice', recordId: order._id, recordLabel: order.invoiceNo, message: `Credit note ${result.creditNote.creditNoteNo} raised on order cancellation`, meta: { creditNoteNo: result.creditNote.creditNoteNo, reason } });
+    }
+
+    return res.json({ ...order.toObject(), creditNote: result.creditNote || null, creditNoteStatus: result.status });
+  } catch (err) {
+    // Credit-note generation failed → do NOT cancel the order; report it (no partial state).
+    return res.status(500).json({ message: 'Could not generate the credit note; the order was not cancelled. Please retry.' });
+  }
 };
 
 // ---- Payments (retail: order-linked, partial/full) ----
@@ -211,6 +312,7 @@ export const addPayment = async (req, res) => {
   });
   order.paidAmount = (order.paidAmount || 0) + Number(amount);
   await order.save();
+  await logActivity(req, { action: 'PAYMENT', module: 'Payment', recordId: payment._id, recordLabel: order.orderNo, message: `Payment recorded: ${amount}` });
   res.status(201).json({ payment, order });
 };
 
@@ -219,6 +321,7 @@ export const deleteCustomer = async (req, res) => {
   const existing = await Customer.findById(req.params.id);
   if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Customer not found' });
   await Customer.findByIdAndDelete(req.params.id);
+  await logActivity(req, { action: 'DELETE', module: 'Customer', recordId: existing._id, recordLabel: existing.name, message: 'Customer deleted' });
   res.json({ message: 'Customer deleted' });
 };
 export const updateCustomer = async (req, res) => {
@@ -226,13 +329,23 @@ export const updateCustomer = async (req, res) => {
   if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Customer not found' });
   // organizationId is tenant-owned — never let it be reassigned via the payload
   const { organizationId, ...patch } = req.body;
+  const changes = diffFields(existing, patch, ['name', 'email', 'mobile', 'city', 'state', 'gstNumber', 'address']);
   const customer = await Customer.findByIdAndUpdate(req.params.id, patch, { new: true });
+  await logActivity(req, { action: 'UPDATE', module: 'Customer', recordId: customer._id, recordLabel: customer.name, message: 'Customer updated', changes });
   res.json(customer);
 };
 export const deleteOrder = async (req, res) => {
   const existing = await Order.findById(req.params.id);
   if (!existing || !ownsOrg(existing, req)) return res.status(404).json({ message: 'Order not found' });
+  // req #2: once an order has a generated invoice or has been cancelled, it must NOT be deleted —
+  // it has to remain for reporting, audit, invoice and credit-note purposes. Enforced on the
+  // backend so it cannot be bypassed through a direct API call.
+  if (existing.invoiceGenerated)
+    return res.status(400).json({ message: 'An order with a generated invoice cannot be deleted (kept for audit/reporting).' });
+  if (existing.cancelled)
+    return res.status(400).json({ message: 'A cancelled order cannot be deleted (kept for audit/reporting).' });
   await Order.findByIdAndDelete(req.params.id);
   await Payment.deleteMany({ orderId: req.params.id });
+  await logActivity(req, { action: 'DELETE', module: 'Order', recordId: existing._id, recordLabel: existing.orderNo, message: 'Order deleted' });
   res.json({ message: 'Order deleted' });
 };

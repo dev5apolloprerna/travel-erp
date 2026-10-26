@@ -1,32 +1,47 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Card, Field, Input, Select, Table, EmptyRow, RowActions, Badge } from '../../components/ui';
 
+const MENU = 'admin-services';   // permission key (req #4)
+const blank = { name: '', type: 'DOMESTIC', hsnCode: '', invoicePrefix: '' };
+
 export default function ServiceMaster() {
   const confirm = useConfirm();
+  const { can } = useAuth();
+  const canCreate = can(MENU, 'CREATE'), canEdit = can(MENU, 'EDIT'), canDelete = can(MENU, 'DELETE');
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ name: '', type: 'DOMESTIC', hsnCode: '', invoicePrefix: '' });
+  const [form, setForm] = useState(blank);
   const [editId, setEditId] = useState(null);
+  const [error, setError] = useState('');
 
   const load = () => api.get('/services').then((r) => setItems(r.data));
   useEffect(() => { load(); }, []);
 
   const submit = async () => {
-    if (!form.name.trim()) return;
-    if (editId) await api.put(`/services/${editId}`, form);
-    else await api.post('/services', form);
-    setForm({ name: '', type: 'DOMESTIC', hsnCode: '', invoicePrefix: '' }); setEditId(null); load();
+    setError('');
+    if (!form.name.trim()) return setError('Service name is required.');
+    try {
+      if (editId) await api.put(`/services/${editId}`, form);
+      else await api.post('/services', form);
+      setForm(blank); setEditId(null); load();
+    } catch (err) { setError(err.response?.data?.message || 'Could not save the service.'); }
   };
-  const edit = (it) => { setForm({ name: it.name, type: it.type, hsnCode: it.hsnCode || '', invoicePrefix: it.invoicePrefix || '' }); setEditId(it._id); };
+  const edit = (it) => { setForm({ name: it.name, type: it.type, hsnCode: it.hsnCode || '', invoicePrefix: it.invoicePrefix || '' }); setEditId(it._id); setError(''); };
   const del = async (it) => {
-    if (await confirm({ title: 'Delete service?', message: `“${it.name} (${it.type})” will be removed.` }))
-      { await api.delete(`/services/${it._id}`); load(); }
+    setError('');
+    if (await confirm({ title: 'Delete service?', message: `“${it.name} (${it.type})” will be removed.` })) {
+      try { await api.delete(`/services/${it._id}`); load(); }
+      catch (err) { setError(err.response?.data?.message || 'Could not delete the service.'); }
+    }
   };
 
   return (
     <div className="max-w-3xl">
       <PageHeader eyebrow="Administration" title="Service Master" />
+      {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+      {(canCreate || canEdit) && (
       <Card title={editId ? 'Edit service' : 'Add service'} className="mb-4">
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex-1"><Field label="Service name"><Input placeholder="Flight, Hotel, Visa…" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field></div>
@@ -44,10 +59,11 @@ export default function ServiceMaster() {
           <div className="w-32"><Field label="HSN / SAC">
             <Input value={form.hsnCode} onChange={(e) => setForm({ ...form, hsnCode: e.target.value })} />
           </Field></div>
-          <button onClick={submit} className="btn-primary">{editId ? 'Update' : 'Add'}</button>
-          {editId && <button onClick={() => { setEditId(null); setForm({ name: '', type: 'DOMESTIC', hsnCode: '', invoicePrefix: '' }); }} className="btn-ghost">Cancel</button>}
+          {(editId ? canEdit : canCreate) && <button onClick={submit} className="btn-primary">{editId ? 'Update' : 'Add'}</button>}
+          {editId && <button onClick={() => { setEditId(null); setForm(blank); setError(''); }} className="btn-ghost">Cancel</button>}
         </div>
       </Card>
+      )}
       <Table head={['Service', 'Type', 'Invoice prefix', 'HSN/SAC', 'Actions']}>
         {items.length === 0 && <EmptyRow span={5} />}
         {items.map((it) => (
@@ -56,7 +72,7 @@ export default function ServiceMaster() {
             <td className="td"><Badge>{it.type === 'DOMESTIC' ? 'Domestic' : 'International'}</Badge></td>
             <td className="td font-mono text-ink">{it.invoicePrefix ? `${it.invoicePrefix}-000001` : <span className="text-ink-muted">Not set</span>}</td>
             <td className="td">{it.hsnCode || '—'}</td>
-            <td className="td"><RowActions onEdit={() => edit(it)} onDelete={() => del(it)} /></td>
+            <td className="td"><RowActions onEdit={canEdit ? () => edit(it) : undefined} onDelete={canDelete ? () => del(it) : undefined} /></td>
           </tr>
         ))}
       </Table>

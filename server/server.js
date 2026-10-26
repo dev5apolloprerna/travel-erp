@@ -19,6 +19,9 @@ import publicRoutes from './routes/publicRoutes.js';
 import ownerRoutes from './routes/ownerRoutes.js';
 import organizationRoutes from './routes/organizationRoutes.js';
 import supplierInvoiceRoutes from './routes/supplierInvoiceRoutes.js';
+import activityLogRoutes from './routes/activityLogRoutes.js';
+import websiteCustomerRoutes from './routes/websiteCustomerRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
 import { stripeWebhook, razorpayWebhook } from './controllers/websiteBookingController.js';
 
 // Load environment variables
@@ -34,38 +37,44 @@ console.log('='.repeat(50));
 
 const app = express();
 
-// CORS configuration - Allow multiple origins
-const allowedOrigins = process.env.CLIENT_URL 
-  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+// Behind a reverse proxy (cPanel/nginx/LiteSpeed) — trust X-Forwarded-* so protocol/host are correct.
+app.set('trust proxy', true);
+
+// ---- CORS ----------------------------------------------------------------
+// IMPORTANT ORDER: the PUBLIC website API (/api/public/*, incl. /api/public/customer) is a SEPARATE
+// site and must be open to ANY origin. It is registered FIRST so its permissive pre-flight handling
+// wins. Previously the restrictive global CORS ran first and answered the OPTIONS pre-flight WITHOUT
+// an Access-Control-Allow-Origin header whenever the website origin (e.g. the Vercel domain) was not
+// in CLIENT_URL — which is exactly what broke /api/public/bookings/:id/confirm from the website.
+const publicCors = cors({
+  origin: true,                                   // reflect the caller's origin (open to all)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
+app.use('/api/public', publicCors);
+app.options('/api/public/*', publicCors);         // always answer the pre-flight for every public route
+console.log('✅ Public API (/api/public/*) open to all origins');
+
+// The ERP admin app (every OTHER /api route) stays restricted to the configured origins.
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map((url) => url.trim())
   : ['*'];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman, mobile apps)
-    if (!origin) return callback(null, true);
-    
-    // Allow all if '*' is in the list
+    if (!origin) return callback(null, true);                 // Postman / mobile / same-origin
     if (allowedOrigins.includes('*')) return callback(null, true);
-    
-    // Check if origin is allowed
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn('⚠️  CORS blocked:', origin);
-      callback(null, false);
-    }
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    console.warn('⚠️  CORS blocked:', origin);
+    callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
 app.use(cors(corsOptions));
-console.log('✅ CORS enabled for origins:', allowedOrigins);
-
-// The public website is a separate site, so its read/booking API is open to any origin.
-app.use('/api/public', cors({ origin: true, methods: ['GET', 'POST', 'OPTIONS'] }));
-console.log('✅ Public website API is open to all origins');
+console.log('✅ CORS enabled; admin origins:', allowedOrigins);
 
 // Payment webhooks need the RAW body to verify their signatures,
 // so they are mounted before the JSON parser.
@@ -126,6 +135,12 @@ app.use('/api/org', organizationRoutes);
 console.log('  ✓ /api/org (organizations / main companies)');
 app.use('/api/supplier-invoices', supplierInvoiceRoutes);
 console.log('  ✓ /api/supplier-invoices (Main Company -> 360 invoices)');
+app.use('/api/activity-logs', activityLogRoutes);
+console.log('  ✓ /api/activity-logs (activity/audit log)');
+app.use('/api/public/customer', websiteCustomerRoutes);
+console.log('  ✓ /api/public/customer (website customer auth)');
+app.use('/api/reports', reportRoutes);
+console.log('  ✓ /api/reports (Reports module — Super Admin only, v60)');
 console.log('  ✓ /api/owner (company owner masters)');
 
 // Error handling

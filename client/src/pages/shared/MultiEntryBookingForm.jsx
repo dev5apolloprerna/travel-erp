@@ -1,5 +1,5 @@
 import ServiceBookingForm from './ServiceBookingForm';
-import { Field, Input } from '../../components/ui';
+import PassengerFields from './PassengerFields';
 
 /**
  * Multiple numbered entries of the SAME service, like the ePrompt
@@ -20,9 +20,9 @@ export default function MultiEntryBookingForm({ serviceName, entries, onChange, 
   const addEntry = () => onChange([...entries, { passengers: withPassengers ? [{ name: '' }] : [] }]);
   const removeEntry = (i) => onChange(entries.filter((_, x) => x !== i));
 
-  const setPassenger = (ei, pi, name) => {
+  const setPassenger = (ei, pi, next) => {
     const e = entries[ei];
-    const passengers = (e.passengers || []).map((p, x) => (x === pi ? { ...p, name } : p));
+    const passengers = (e.passengers || []).map((p, x) => (x === pi ? next : p));
     setEntry(ei, { ...e, passengers });
   };
   const addPassenger = (ei) => {
@@ -54,12 +54,9 @@ export default function MultiEntryBookingForm({ serviceName, entries, onChange, 
               <div className="mt-4">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Passengers</div>
                 {(entry.passengers || []).map((p, pi) => (
-                  <div key={pi} className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto]">
-                    <Input placeholder="Passenger name" value={p.name || ''} onChange={(e) => setPassenger(i, pi, e.target.value)} />
-                    {(entry.passengers || []).length > 1 && (
-                      <button type="button" onClick={() => removePassenger(i, pi)} className="btn-ghost btn-sm">Remove</button>
-                    )}
-                  </div>
+                  <PassengerFields key={pi} value={p} index={pi}
+                    onChange={(next) => setPassenger(i, pi, next)}
+                    onRemove={(entry.passengers || []).length > 1 ? () => removePassenger(i, pi) : undefined} />
                 ))}
                 <button type="button" onClick={() => addPassenger(i)} className="btn-ghost btn-sm">+ Add passenger</button>
               </div>

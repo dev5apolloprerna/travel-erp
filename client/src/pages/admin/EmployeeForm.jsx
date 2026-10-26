@@ -9,6 +9,8 @@ import { useShellBase } from '../../hooks/useShellBase';
 const MODULES = ['RETAIL', 'B2B', 'FIT'];
 // menu keys the admin can grant (flatten menu config, skip dashboard)
 const MENU_KEYS = MENU.flatMap((g) => g.items).filter((i) => i.key !== 'dashboard');
+// req #9: the ONLY permission actions available per menu.
+const ACTIONS = ['SELECT', 'READ', 'CREATE', 'EDIT', 'DELETE', 'EXPORT', 'IMPORT'];
 
 export default function EmployeeForm() {
   const { id } = useParams();
@@ -17,9 +19,10 @@ export default function EmployeeForm() {
   const base = useShellBase();
   const [services, setServices] = useState([]);
   const [opts, setOpts] = useState({ city: [], department: [], designation: [] });
+  const [error, setError] = useState('');
   const [form, setForm] = useState({
     name: '', email: '', phone: '', password: '', employeeTypes: ['DOMESTIC'],
-    menus: [], modules: [], services: [], isActive: true, hr: {},
+    menus: [], permissions: {}, modules: [], services: [], isActive: true, hr: {},
   });
 
   useEffect(() => {
@@ -31,10 +34,15 @@ export default function EmployeeForm() {
     if (editing) {
       api.get(`/auth/employees/${id}`).then((r) => {
         const e = r.data;
+        // req #9: load the stored action matrix. For a legacy employee that only has the old
+        // `menus` list, derive full actions on each granted menu so their effective access shows.
+        const perms = e.permissions && Object.keys(e.permissions).length
+          ? e.permissions
+          : Object.fromEntries((e.menus || []).filter((k) => k !== 'ALL').map((k) => [k, [...ACTIONS]]));
         setForm({
           name: e.name, email: e.email, phone: e.phone || '', password: '',
           employeeTypes: e.employeeTypes?.length ? e.employeeTypes : (e.employeeType ? [e.employeeType] : ['DOMESTIC']),
-          menus: e.menus || [], modules: e.modules || [],
+          menus: e.menus || [], permissions: perms, modules: e.modules || [],
           services: (e.services || []).map((s) => s._id || s),
           isActive: e.isActive !== false, hr: e.hr || {},
         });
@@ -56,15 +64,55 @@ export default function EmployeeForm() {
     ...f, [field]: f[field].includes(val) ? f[field].filter((x) => x !== val) : [...f[field], val],
   }));
 
+  // req #9: per-menu action-matrix helpers.
+  const hasAction = (key, a) => (form.permissions[key] || []).includes(a);
+  const toggleAction = (key, a) => setForm((f) => {
+    const cur = f.permissions[key] || [];
+    const next = cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a];
+    const permissions = { ...f.permissions };
+    if (next.length) permissions[key] = next; else delete permissions[key];
+    return { ...f, permissions };
+  });
+  const toggleMenuRow = (key) => setForm((f) => {
+    const all = ACTIONS.every((a) => (f.permissions[key] || []).includes(a));
+    const permissions = { ...f.permissions };
+    if (all) delete permissions[key]; else permissions[key] = [...ACTIONS];
+    return { ...f, permissions };
+  });
+  const toggleActionColumn = (a) => setForm((f) => {
+    const everyOn = MENU_KEYS.every((it) => (f.permissions[it.key] || []).includes(a));
+    const permissions = { ...f.permissions };
+    MENU_KEYS.forEach((it) => {
+      const cur = permissions[it.key] || [];
+      const next = everyOn ? cur.filter((x) => x !== a) : (cur.includes(a) ? cur : [...cur, a]);
+      if (next.length) permissions[it.key] = next; else delete permissions[it.key];
+    });
+    return { ...f, permissions };
+  });
+  const grantAllPerms = () => setForm((f) => ({ ...f, permissions: Object.fromEntries(MENU_KEYS.map((it) => [it.key, [...ACTIONS]])) }));
+  const clearAllPerms = () => setForm((f) => ({ ...f, permissions: {} }));
+
   const save = async () => {
-    if (editing) await api.put(`/auth/employees/${id}`, form);
-    else await api.post('/auth/employees', form);
-    nav(`${base}/admin/employees`);
+    setError('');
+    if (!form.name.trim()) return setError('Full name is required.');
+    if (!form.email.trim()) return setError('Email is required.');
+    if (!editing && !form.password) return setError('A password is required for a new employee.');
+    // Derive menu visibility from the action matrix (a menu is visible if it has any action).
+    const payload = { ...form, menus: Object.keys(form.permissions).filter((k) => (form.permissions[k] || []).length) };
+    try {
+      if (editing) await api.put(`/auth/employees/${id}`, payload);
+      else await api.post('/auth/employees', payload);
+      nav(`${base}/admin/employees`);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not save the employee.');
+    }
   };
 
   return (
     <div className="max-w-3xl">
       <PageHeader eyebrow="Administration" title={editing ? 'Edit employee' : 'Create employee'} />
+
+      {error && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
 
       <Card title="Employee details" className="mb-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -158,24 +206,51 @@ export default function EmployeeForm() {
         </div>
       </Card>
 
-      <Card title="Menu access" className="mb-4">
-        <label className="mb-3 flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold text-ink">
-          <input
-            type="checkbox"
-            checked={allSelected('menus', MENU_KEYS.map((i) => i.key))}
-            onChange={() => toggleAll('menus', MENU_KEYS.map((i) => i.key))}
-          />
-          Select all menus
-        </label>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {MENU_KEYS.map((it) => (
-            <label key={it.key} className="flex items-center gap-2 text-sm text-ink-soft">
-              <input type="checkbox" checked={form.menus.includes(it.key)} onChange={() => toggle('menus', it.key)} />
-              {it.label}
-            </label>
-          ))}
+      {/* req #9: per-menu permission matrix. The only actions are Select / Read / Create /
+          Edit / Delete / Export / Import, enforced on the backend. */}
+      <Card title="Menu permissions" className="mb-4">
+        <div className="mb-3 flex flex-wrap gap-2 border-b border-line pb-2">
+          <button type="button" onClick={grantAllPerms} className="btn-ghost btn-sm">Grant all</button>
+          <button type="button" onClick={clearAllPerms} className="btn-ghost btn-sm">Clear all</button>
         </div>
-        <p className="mt-2 text-xs text-ink-muted">Employee sees and manages only the menus checked here.</p>
+        <div className="-mx-1 overflow-x-auto">
+          <table className="w-full min-w-[680px] px-1 text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-muted">
+                <th className="py-2 pr-2 font-semibold">Menu</th>
+                {/* req #1: "All" is the first permission column, before Select/Read/… */}
+                <th className="px-1 py-2 text-center font-semibold">All</th>
+                {ACTIONS.map((a) => (
+                  <th key={a} className="px-1 py-2 text-center font-semibold">
+                    <button type="button" onClick={() => toggleActionColumn(a)} className="hover:text-brand" title={`Toggle ${a} for all menus`}>
+                      {a.charAt(0) + a.slice(1).toLowerCase()}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {MENU_KEYS.map((it) => (
+                <tr key={it.key} className="border-b border-subtle">
+                  <td className="py-1.5 pr-2 text-ink-soft">{it.label}</td>
+                  {/* req #1: row "All" toggle first — selects/clears every action and stays in sync. */}
+                  <td className="px-1 py-1.5 text-center">
+                    <input
+                      type="checkbox"
+                      checked={ACTIONS.every((a) => hasAction(it.key, a))}
+                      onChange={() => toggleMenuRow(it.key)} />
+                  </td>
+                  {ACTIONS.map((a) => (
+                    <td key={a} className="px-1 py-1.5 text-center">
+                      <input type="checkbox" checked={hasAction(it.key, a)} onChange={() => toggleAction(it.key, a)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-ink-muted">A menu is visible to the employee when it has at least one action granted. Permissions are enforced on the server.</p>
       </Card>
 
       <Card title="Service booking rights" className="mb-4">

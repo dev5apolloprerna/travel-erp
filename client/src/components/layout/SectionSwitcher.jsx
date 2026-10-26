@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useArea } from '../../context/AreaContext';
 import { availableAreas, visibleMenu } from '../../menuConfig';
 
-const ICONS = { website: '🌐', booking: '🧳', account: '🧾', master: '🗂️' };
+const ICONS = { website: '🌐', booking: '🧳', account: '🧾', master: '🗂️', reports: '📊' };
 
 // Reusable Switch-Section popup (req #1/#2). Opened from the header profile dropdown AND once
 // automatically after login — one component, one source of truth for the section list + routing.
