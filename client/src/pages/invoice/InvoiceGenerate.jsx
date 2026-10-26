@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
-import { useAuth } from '../../context/AuthContext';
-import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { PageHeader, Card, Field, Input, money } from '../../components/ui';
 import { formFor } from '../shared/serviceForms';
-import { chargeCalc, hotelCalc, applyFooter } from './invoiceCalc';
+import { chargeCalc, hotelCalc } from './invoiceCalc';
 import { useShellBase } from '../../hooks/useShellBase';
 
 const FOOTER = [
@@ -13,7 +11,6 @@ const FOOTER = [
   ['tdsAmount', 'TDS Amount', '-'],
   ['tcsAmount', 'TCS Amount', '-'],
   ['govtTaxAmount', 'Govt Tax Amount', '+'],
-  ['serviceChargeAmount', '360 Service Charge', '+'],   // req #7 — manual at billing time
 ];
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
@@ -21,20 +18,12 @@ export default function InvoiceGenerate() {
   const { orderId } = useParams();
   const nav = useNavigate();
   const base = useShellBase();
-  const { user } = useAuth();
-  const confirm = useConfirm();
-  // Invoice cancellation is SUPER ADMIN only. Company Owner and Company Employee may edit/hold
-  // invoices but cannot cancel or delete them. Mirrors the backend route guard.
-  const canCancelInvoice = user?.role === 'SUPER_ADMIN';
 
   const [order, setOrder] = useState(null);
   const [party, setParty] = useState(null);
   const [calc, setCalc] = useState(null);           // { serviceType, isHotel, charges[], markups[], labels{} }
   const [charges, setCharges] = useState({});        // charge-head values
   const [rooms, setRooms] = useState([]);            // hotel rooms
-  const [isPackage, setIsPackage] = useState(false);          // req #3
-  const [pkgServices, setPkgServices] = useState([]);         // [{ index, serviceType, label }]
-  const [pkgAmounts, setPkgAmounts] = useState([]);           // amount per package service
   const [footer, setFooter] = useState(Object.fromEntries(FOOTER.map(([k]) => [k, ''])));
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
@@ -48,21 +37,12 @@ export default function InvoiceGenerate() {
       setParty(r.data.party);
       setCalc(r.data.calc);
       const o = r.data.order;
-      // req #3: package order — one amount per included service.
-      if (r.data.isPackage) {
-        setIsPackage(true);
-        const svcs = r.data.packageServices || [];
-        setPkgServices(svcs);
-        const saved = o.invoicePackageLines || [];
-        setPkgAmounts(svcs.map((_, i) => (saved[i]?.amount ?? '')));
-      }
-      // Pre-fill footer (and charge heads) if regenerating.
-      if (o.invoiceGenerated) {
-        if (o.invoiceCharges) setCharges(o.invoiceCharges);
+      // Pre-fill charge heads if regenerating.
+      if (o.invoiceGenerated && o.invoiceCharges) {
+        setCharges(o.invoiceCharges);
         setFooter({
           discountAmount: o.discountAmount || '', tdsAmount: o.tdsAmount || '',
           tcsAmount: o.tcsAmount || '', govtTaxAmount: o.govtTaxAmount || '',
-          serviceChargeAmount: o.serviceChargeAmount || '',
         });
         if (o.invoiceDate) setInvoiceDate(String(o.invoiceDate).slice(0, 10));
         setNotes(o.invoiceNotes || '');
@@ -78,15 +58,11 @@ export default function InvoiceGenerate() {
     }).catch(() => setError('Could not load this order.'));
   }, [orderId]);
 
-  // Live totals — service-wise, or package (sum of per-service amounts).
+  // Live totals — service-wise.
   const result = useMemo(() => {
-    if (isPackage) {
-      const grossTotal = Math.round(pkgAmounts.reduce((s, a) => s + n(a), 0) * 100) / 100;
-      return { grossTotal, chargesTotal: grossTotal, markupTotal: 0, ...applyFooter(grossTotal, footer) };
-    }
     if (!calc) return null;
     return calc.isHotel ? hotelCalc(rooms, footer) : chargeCalc(calc.serviceType, charges, footer);
-  }, [isPackage, pkgAmounts, calc, charges, rooms, footer]);
+  }, [calc, charges, rooms, footer]);
 
   const generate = async () => {
     setError(''); setSaving(true);
@@ -94,11 +70,9 @@ export default function InvoiceGenerate() {
       const body = {
         discountAmount: n(footer.discountAmount), tdsAmount: n(footer.tdsAmount),
         tcsAmount: n(footer.tcsAmount), govtTaxAmount: n(footer.govtTaxAmount),
-        serviceChargeAmount: n(footer.serviceChargeAmount),   // req #7
         invoiceDate, invoiceNotes: notes,
       };
-      if (isPackage) body.packageLines = pkgServices.map((_, i) => ({ amount: n(pkgAmounts[i]) }));
-      else if (calc.isHotel) body.rooms = rooms;
+      if (calc.isHotel) body.rooms = rooms;
       else body.charges = Object.fromEntries((calc.charges.concat(calc.markups)).map((k) => [k, n(charges[k])]));
       const res = await api.post(`/invoices/${orderId}/generate`, body);
       setDone(res.data);
@@ -112,38 +86,6 @@ export default function InvoiceGenerate() {
     const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
     const a = document.createElement('a');
     a.href = url; a.download = `${done?.invoiceNo || 'invoice'}.pdf`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  // req #8: Super-Admin-only invoice cancellation → raises a linked Credit Note. The backend
-  // re-checks the role, so this cannot be bypassed from the UI.
-  const cancelInvoice = async () => {
-    const ok = await confirm({
-      title: 'Cancel this invoice?',
-      message: `Invoice ${order.invoiceNo} will be cancelled and a Credit Note raised. The invoice record is kept for audit/reporting.`,
-    });
-    if (!ok) return;
-    try {
-      const res = await api.post(`/invoices/${orderId}/cancel`, {});
-      // Refresh the order so the cancelled state + credit note show.
-      const r = await api.get(`/invoices/${orderId}`);
-      setOrder(r.data.order);
-      setError('');
-      setDone(null);
-      alert(res.data.message || 'Invoice cancelled and credit note raised.');
-    } catch (err) {
-      setError(err.response?.data?.message || 'Could not cancel the invoice.');
-    }
-  };
-
-  // Download the credit note document for a cancelled invoice (links invoice → credit note).
-  const downloadCreditNote = async () => {
-    if (!order?.creditNoteId) return;
-    const res = await api.get(`/invoices/credit-notes/${order.creditNoteId}/pdf`, { responseType: 'blob' });
-    const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `${order.creditNoteNo || 'credit-note'}.pdf`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   };
@@ -186,25 +128,12 @@ export default function InvoiceGenerate() {
           <Card title="Invoice details" className="mb-4">
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Bill to"><Input value={party?.name || '—'} disabled /></Field>
-              <Field label="Service"><Input value={isPackage ? `Package (${pkgServices.length} services)` : (order.services?.length > 1 ? `${calc.serviceType} (${order.services.length} entries)` : calc.serviceType)} disabled /></Field>
+              <Field label="Service"><Input value={order.services?.length > 1 ? `${calc.serviceType} (${order.services.length} entries)` : calc.serviceType} disabled /></Field>
               <Field label="Invoice date"><Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} /></Field>
             </div>
           </Card>
 
-          {isPackage ? (
-            <Card title="Package services">
-              <div className="space-y-2">
-                {pkgServices.map((s, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_160px] items-center gap-2">
-                    <span className="text-sm text-ink-soft">{s.label || s.serviceType}</span>
-                    <Input type="number" value={pkgAmounts[i] ?? ''} placeholder="0"
-                      onChange={(e) => setPkgAmounts((prev) => prev.map((a, x) => (x === i ? e.target.value : a)))} />
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-ink-muted">Enter the amount for each included service. The package gross is their sum; taxes/discounts apply below.</p>
-            </Card>
-          ) : calc.isHotel ? (
+          {calc.isHotel ? (
             <Card title="Rooms" className="mb-0">
               <div className="mb-2 hidden gap-2 px-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted sm:grid sm:grid-cols-[1.4fr_0.8fr_0.9fr_0.8fr_1fr_1fr_auto]">
                 <span>Room Type</span><span>Rooms</span><span>Rate</span><span>Tax %</span><span>Room Amt</span><span>Tax Amt</span><span></span>
@@ -256,9 +185,7 @@ export default function InvoiceGenerate() {
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <Card title="Totals">
               <div className="space-y-2">
-                {isPackage ? (
-                  <Row label="Services Total" value={money(result.chargesTotal)} />
-                ) : calc.isHotel ? (
+                {calc.isHotel ? (
                   <>
                     <Row label="Total Room Amount" value={money(result.totalRoomAmount)} />
                     <Row label="Total Hotel Tax" value={money(result.totalHotelTax)} />
@@ -288,7 +215,7 @@ export default function InvoiceGenerate() {
                   <span className="text-sm font-bold text-ink">Net Invoice Amount</span>
                   <div className="text-right text-lg font-bold text-brand">{money(result.netInvoiceAmount)}</div>
                 </div>
-                <p className="pt-1 text-xs text-ink-muted">Net = Gross − Discount − TDS − TCS + Govt Tax + Service Charge</p>
+                <p className="pt-1 text-xs text-ink-muted">Net = Gross − Discount − TDS − TCS + Govt Tax</p>
               </div>
             </Card>
           </div>
@@ -297,29 +224,11 @@ export default function InvoiceGenerate() {
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any note to print on the invoice" />
           </Card>
 
-          {order.invoiceCancelled && (
-            <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-              <div>
-                This invoice was cancelled{order.creditNoteNo ? <> and credit note <b>{order.creditNoteNo}</b> was raised</> : ''}.
-                The record is kept for audit/reporting and cannot be regenerated.
-              </div>
-              {order.creditNoteId && (
-                <button onClick={downloadCreditNote} className="btn-ghost btn-sm mt-2">Download credit note</button>
-              )}
-            </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {!order.invoiceCancelled && (
-              <button onClick={generate} disabled={saving} className="btn-primary">
-                {saving ? 'Generating…' : order.invoiceGenerated ? 'Regenerate invoice' : 'Generate invoice'}
-              </button>
-            )}
-            {/* req #8: only a 360 Super Admin may cancel a generated invoice (backend-enforced). */}
-            {order.invoiceGenerated && !order.invoiceCancelled && canCancelInvoice && (
-              <button onClick={cancelInvoice} className="btn-danger">Cancel invoice &amp; raise credit note</button>
-            )}
-            <button onClick={() => nav(backTo)} className="btn-ghost">Back</button>
+          <div className="mt-4 flex gap-2">
+            <button onClick={generate} disabled={saving} className="btn-primary">
+              {saving ? 'Generating…' : order.invoiceGenerated ? 'Regenerate invoice' : 'Generate invoice'}
+            </button>
+            <button onClick={() => nav(backTo)} className="btn-ghost">Cancel</button>
           </div>
         </>
       )}

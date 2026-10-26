@@ -11,9 +11,6 @@ export const ROLES = {
   COMPANY_OWNER: 'COMPANY_OWNER', // owns the company's master data (wireframe masters)
 };
 
-// req #9: the fixed set of per-menu actions. This is the ONLY permission vocabulary.
-export const PERMISSION_ACTIONS = ['SELECT', 'READ', 'CREATE', 'EDIT', 'DELETE', 'EXPORT', 'IMPORT'];
-
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -39,15 +36,8 @@ const userSchema = new mongoose.Schema(
     documents: [documentSchema],
 
     // ---- Employee rights (UI-driven this round) ----
-    // which sidebar menus this employee can see/manage (keys from client menu config).
-    // Kept as the source of menu VISIBILITY; it is derived from `permissions` on save so the
-    // existing sidebar (visibleMenu) keeps working unchanged.
+    // which sidebar menus this employee can see/manage (keys from client menu config)
     menus: { type: [String], default: [] },
-    // req #9: per-menu ACTION permissions. Shape: { [menuKey]: ['SELECT','READ','CREATE',
-    // 'EDIT','DELETE','EXPORT','IMPORT'] }. Replaces the old "many permission types" screen with
-    // this fixed 7-action matrix. Enforced on the backend (see middleware `can`). Legacy employees
-    // without this field fall back to menu-based access so nothing breaks.
-    permissions: { type: mongoose.Schema.Types.Mixed, default: {} },
     // which client-type modules they can work in
     modules: { type: [String], enum: ['RETAIL', 'B2B', 'FIT'], default: [] },
     // which services they can book (Service master ids)
@@ -69,14 +59,6 @@ userSchema.pre('save', function (next) {
     this.employeeType = this.employeeTypes[0];
   } else if (this.employeeType) {
     this.employeeTypes = [this.employeeType];
-  }
-  // req #9: keep `menus` (visibility) in sync with the action matrix — a menu is visible when
-  // it has at least one action granted. Only derive when a non-empty matrix is present, so
-  // legacy records that set `menus` directly (and have no matrix) are left untouched.
-  if (this.permissions && typeof this.permissions === 'object' && Object.keys(this.permissions).length) {
-    this.menus = Object.keys(this.permissions).filter(
-      (k) => Array.isArray(this.permissions[k]) && this.permissions[k].length > 0
-    );
   }
   next();
 });

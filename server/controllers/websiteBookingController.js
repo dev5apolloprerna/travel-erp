@@ -1,6 +1,4 @@
-import crypto from 'crypto';
 import WebsiteBooking from '../models/WebsiteBooking.js';
-import WebsiteCustomer from '../models/WebsiteCustomer.js';
 import TourPackage from '../models/TourPackage.js';
 import Customer from '../models/Customer.js';
 import Order from '../models/Order.js';
@@ -13,6 +11,7 @@ import {
 import { sendMail } from '../utils/mailer.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 const normEmail = (e) => (e || '').trim().toLowerCase();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -73,6 +72,7 @@ const resolveWebsiteCustomer = async ({ websitecustomer_id, customerName, email,
   }
 };
 
+
 /**
  * Website bookings.
  * Public endpoints are used by the separate marketing website;
@@ -87,31 +87,17 @@ const resolveWebsiteCustomer = async ({ websitecustomer_id, customerName, email,
  */
 export const createBooking = async (req, res) => {
   const {
-    packageId, customerName, customerMobile,
+    packageId, customerName, customerEmail, customerMobile,
     address, city, state, country, travelDate,
     adults = 1, children = 0, passengers = [], specialRequest,
-    websitecustomer_id = null,
   } = req.body;
-  const customerEmail = normEmail(req.body?.customerEmail);
 
-  // ---- Validation (req 2.1) -------------------------------------------------
   if (!packageId) return res.status(400).json({ message: 'Please choose a package.' });
-  if (!customerName || !customerEmail) return res.status(400).json({ message: 'Name and email are required to book.' });
-  if (!EMAIL_RE.test(customerEmail)) return res.status(400).json({ message: 'A valid email address is required.' });
-  if (customerMobile && !/^[+\d][\d\s-]{6,15}$/.test(String(customerMobile))) {
-    return res.status(400).json({ message: 'Please enter a valid mobile number.' });
+  if (!customerName || !customerEmail) {
+    return res.status(400).json({ message: 'Name and email are required to book.' });
   }
-  const nAdults = Math.max(1, Number(adults) || 1);
-  const nChildren = Math.max(0, Number(children) || 0);
-  if (!Number.isFinite(nAdults) || !Number.isFinite(nChildren)) {
-    return res.status(400).json({ message: 'Passenger counts must be numbers.' });
-  }
-  if (travelDate && Number.isNaN(Date.parse(travelDate))) {
-    return res.status(400).json({ message: 'Please provide a valid travel date.' });
-  }
-  const paxList = (Array.isArray(passengers) ? passengers : []).map(normPassenger).filter(Boolean);
 
-  const pkg = await TourPackage.findById(packageId).catch(() => null);
+  const pkg = await TourPackage.findById(packageId);
   if (!pkg || !pkg.isActive) return res.status(404).json({ message: 'That package is not available.' });
 
   // ---- Resolve / create the website customer (req 2.2 / 2.3) ----------------
@@ -128,11 +114,12 @@ export const createBooking = async (req, res) => {
 
   // Price is taken from the package on the server — never trusted from the browser.
   const perPerson = pkg.discountPrice > 0 ? pkg.discountPrice : pkg.price;
-  const payingPax = nAdults + nChildren;
+  const payingPax = Math.max(1, Number(adults) || 1) + Math.max(0, Number(children) || 0);
   const subTotal = round2(perPerson * payingPax);
   const gstPercent = Number(pkg.gstPercent) || 0;
   const gstAmount = round2((subTotal * gstPercent) / 100);
   const totalAmount = round2(subTotal + gstAmount);
+
   const currency = pkg.type === 'INTERNATIONAL'
     ? (pkg.currency || settings.currencyInternational || 'USD')
     : (pkg.currency || settings.currencyDomestic || 'INR');
@@ -141,12 +128,12 @@ export const createBooking = async (req, res) => {
     packageId: pkg._id,
     packageName: pkg.name,
     packageType: pkg.type,
-    websitecustomer_id: customer?._id || null,
     customerName, customerEmail, customerMobile,
     address, city, state, country: country || 'India',
     travelDate: travelDate || undefined,
-    adults: nAdults, children: nChildren,
-    passengers: paxList,
+    adults: Number(adults) || 1,
+    children: Number(children) || 0,
+    passengers: Array.isArray(passengers) ? passengers.filter(Boolean) : [],
     specialRequest,
     pricePerPerson: perPerson,
     subTotal, gstPercent, gstAmount, totalAmount, currency,
@@ -157,7 +144,7 @@ export const createBooking = async (req, res) => {
   if (!payment.ok) {
     booking.paymentError = payment.error;
     await booking.save();
-    return res.status(400).json({ message: payment.error, bookingNo: booking.bookingNo, customerId: customer?._id, customerCreated: created });
+    return res.status(400).json({ message: payment.error, bookingNo: booking.bookingNo });
   }
 
   booking.gatewayOrderId = payment.orderId;
@@ -199,10 +186,7 @@ export const createBooking = async (req, res) => {
     bookingId: booking._id,
     amount: booking.totalAmount,
     currency: booking.currency,
-    customerId: customer?._id || null,
-    customerCreated: created,          // true only when a new website customer was created
-    customerEmailSent,                 // welcome email outcome (new customers only)
-    payment,                           // everything the website checkout needs
+    payment,          // everything the website checkout needs
   });
 };
 

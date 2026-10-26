@@ -4,7 +4,6 @@ import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { Tabs } from '../../../components/ui';
 import { FieldsGrid, DetailGrid, MultiCheck } from './formHelpers';
-import { useMasterBase } from '../useMasterBase';
 
 // Hotel Add/Edit — four tabs (requirement #5): Basic / Room / Season / Terms.
 // Basic uses the existing `hotelHead` master (+ additive multi-selects & terms fields).
@@ -56,8 +55,7 @@ export default function HotelForm() {
   }, []);
 
   const setField = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
-  const base = useMasterBase();
-  const backToList = () => nav(`${base}/hotelHead`);
+  const backToList = () => nav('/owner/hotelHead');
 
   const save = async ({ stay } = {}) => {
     setError(''); setNotice(''); setSaving(true);
@@ -69,7 +67,7 @@ export default function HotelForm() {
       } else {
         const r = await api.post('/owner/masters/hotelHead', form);
         if (stay && r.data?._id) {
-          nav(`${base}/hotelHead/${r.data._id}/edit`, { replace: true });
+          nav(`/owner/hotelHead/${r.data._id}/edit`, { replace: true });
           setNotice('Hotel created. You can now add room and season configurations.');
         } else backToList();
       }

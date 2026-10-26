@@ -2694,3 +2694,5 @@ keeps its own values; multiple passengers don't overwrite each other.
 Verified: `vite build` OK; `node --check` on changed server files; schema
 validation test (blank + filled dates) passes; charge-head breakdown reconciles
 to Net; grouped PDF renders.
+=======
+

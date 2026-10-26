@@ -21,6 +21,7 @@ r.post('/logout', protectWebsiteCustomer, c.logout);                 // v53: sig
 r.get('/bookings', protectWebsiteCustomer, c.myBookings);            // v53: grouped bookings
 r.post('/bookings/cancel', protectWebsiteCustomer, c.cancelMyBooking);      // v59: customer cancels own booking
 r.post('/bookings/bill', protectWebsiteCustomer, c.downloadMyBookingBill);  // v59: download booking bill PDF
+
 r.get('/bookings/:type', protectWebsiteCustomer, c.myBookings);      // v53: one category
 r.get('/wishlist', protectWebsiteCustomer, c.myWishlist);            // v51: restored
 r.post('/wishlist-delete', protectWebsiteCustomer, c.deleteWishlist); // v51: remove one wishlist item

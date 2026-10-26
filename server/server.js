@@ -22,6 +22,7 @@ import supplierInvoiceRoutes from './routes/supplierInvoiceRoutes.js';
 import activityLogRoutes from './routes/activityLogRoutes.js';
 import websiteCustomerRoutes from './routes/websiteCustomerRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+
 import { stripeWebhook, razorpayWebhook } from './controllers/websiteBookingController.js';
 
 // Load environment variables
@@ -141,6 +142,7 @@ app.use('/api/public/customer', websiteCustomerRoutes);
 console.log('  ✓ /api/public/customer (website customer auth)');
 app.use('/api/reports', reportRoutes);
 console.log('  ✓ /api/reports (Reports module — Super Admin only, v60)');
+
 console.log('  ✓ /api/owner (company owner masters)');
 
 // Error handling

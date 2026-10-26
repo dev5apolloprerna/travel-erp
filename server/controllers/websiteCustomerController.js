@@ -262,6 +262,7 @@ export const myBookings = async (req, res) => {
 
 // GET /api/public/customer/wishlist   (auth) -> this customer's wishlist with package details
 export const myWishlist = async (req, res) => {
+
   // v59: return the FULL package detail (all fields), not just a few.
   const rows = await Wishlist.find({ websitecustomer_id: req.websiteCustomer._id })
     .populate('package_id')
@@ -284,6 +285,7 @@ export const deleteWishlist = async (req, res) => {
   if (!result.deletedCount) return res.status(404).json({ message: 'Wishlist item not found.' });
   res.json({ message: 'Removed from wishlist.', deleted: result.deletedCount });
 };
+
 
 // POST /api/public/customer/bookings/cancel   (auth)   body: { booking_id, cancel_reason }
 // The signed-in customer cancels ONE of their own website bookings. Scoped by the auth token, so a

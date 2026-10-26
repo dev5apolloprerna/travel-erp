@@ -1,5 +1,4 @@
 import Organization, { ORG_TYPES } from '../models/Organization.js';
-import { logActivity } from '../utils/activityLog.js';
 
 // The 360 org the caller operates within (their own org, or the default 360 org).
 const the360OrgId = async (req) => {
@@ -33,7 +32,6 @@ export const createMainCompany = async (req, res) => {
     parentId: orgId,
     isDefault: false,
   });
-  await logActivity(req, { action: 'CREATE', module: 'MainCompany', recordId: doc._id, recordLabel: doc.name, message: 'Main Company created' });
   res.status(201).json(doc);
 };
 
@@ -46,7 +44,6 @@ export const updateMainCompany = async (req, res) => {
   const { type, parentId, isDefault, ...rest } = req.body;
   Object.assign(row, rest);
   await row.save();
-  await logActivity(req, { action: 'UPDATE', module: 'MainCompany', recordId: row._id, recordLabel: row.name, message: 'Main Company updated' });
   res.json(row);
 };
 
@@ -56,7 +53,6 @@ export const deleteMainCompany = async (req, res) => {
   const row = await Organization.findOne({ _id: req.params.id, type: ORG_TYPES.MAIN_COMPANY, parentId: orgId });
   if (!row) return res.status(404).json({ message: 'Main Company not found' });
   await row.deleteOne();
-  await logActivity(req, { action: 'DELETE', module: 'MainCompany', recordId: row._id, recordLabel: row.name, message: 'Main Company deleted' });
   res.json({ message: 'Main Company deleted' });
 };
 

@@ -3,7 +3,6 @@ import Leave, { LeaveBalance, LEAVE_TYPES } from '../models/Leave.js';
 import SalarySlip from '../models/SalarySlip.js';
 import User, { ROLES } from '../models/User.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
-import { logActivity } from '../utils/activityLog.js';
 
 const isAdmin = (u) => u.role === ROLES.SUPER_ADMIN || (u.menus || []).includes('ALL');
 const daysBetween = (from, to) => {
@@ -19,23 +18,17 @@ export const listHolidays = async (req, res) => {
   const holidays = await Holiday.find(filter).sort('date');
   res.json(holidays);
 };
-export const createHoliday = async (req, res) => {
-  const h = await Holiday.create(req.body);
-  await logActivity(req, { action: 'CREATE', module: 'Holiday', recordId: h._id, recordLabel: h.name, message: 'Holiday created' });
-  res.status(201).json(h);
-};
+export const createHoliday = async (req, res) =>
+  res.status(201).json(await Holiday.create(req.body));
 export const updateHoliday = async (req, res) => {
   const h = await Holiday.findById(req.params.id);
   if (!h) return res.status(404).json({ message: 'Holiday not found' });
   Object.assign(h, req.body);
   await h.save();                       // keeps `year` in sync via pre-save
-  await logActivity(req, { action: 'UPDATE', module: 'Holiday', recordId: h._id, recordLabel: h.name, message: 'Holiday updated' });
   res.json(h);
 };
 export const deleteHoliday = async (req, res) => {
-  const existing = await Holiday.findById(req.params.id);
   await Holiday.findByIdAndDelete(req.params.id);
-  if (existing) await logActivity(req, { action: 'DELETE', module: 'Holiday', recordId: existing._id, recordLabel: existing.name, message: 'Holiday deleted' });
   res.json({ message: 'Holiday deleted' });
 };
 
@@ -93,7 +86,6 @@ export const applyLeave = async (req, res) => {
     days: daysBetween(fromDate, toDate),
     reason,
   });
-  await logActivity(req, { action: 'CREATE', module: 'Leave', recordId: leave._id, recordLabel: `${leaveType} ${leave.days}d`, message: 'Leave applied' });
   res.status(201).json(leave);
 };
 
@@ -134,7 +126,6 @@ export const decideLeave = async (req, res) => {
   leave.approvedBy = req.user._id;
   leave.approvedAt = new Date();
   await leave.save();
-  await logActivity(req, { action: status === 'APPROVED' ? 'APPROVE' : 'REJECT', module: 'Leave', recordId: leave._id, recordLabel: String(leave._id), message: `Leave ${status.toLowerCase()}`, meta: { adminRemark } });
   res.json(leave);
 };
 
@@ -149,7 +140,6 @@ export const cancelLeave = async (req, res) => {
 
   leave.status = 'CANCELLED';
   await leave.save();
-  await logActivity(req, { action: 'CANCEL', module: 'Leave', recordId: leave._id, recordLabel: String(leave._id), message: 'Leave cancelled' });
   res.json(leave);
 };
 
@@ -169,7 +159,6 @@ export const uploadSalarySlip = async (req, res) => {
     remark: remark || '',
     uploadedBy: req.user._id,
   });
-  await logActivity(req, { action: 'CREATE', module: 'SalarySlip', recordId: slip._id, recordLabel: `${slip.month}/${slip.year}`, message: 'Salary slip uploaded' });
   res.status(201).json(slip);
 };
 
@@ -197,7 +186,6 @@ export const deleteSalarySlip = async (req, res) => {
   if (!slip) return res.status(404).json({ message: 'Salary slip not found' });
   removeFile(slip.fileUrl);
   await slip.deleteOne();
-  await logActivity(req, { action: 'DELETE', module: 'SalarySlip', recordId: slip._id, recordLabel: `${slip.month}/${slip.year}`, message: 'Salary slip deleted' });
   res.json({ message: 'Salary slip deleted' });
 };
 

@@ -48,11 +48,6 @@ import ContentMaster from './pages/cms/ContentMaster';
 import WebsiteBookings from './pages/cms/WebsiteBookings';
 import OtherPages from './pages/cms/OtherPages';
 import InquiryList from './pages/cms/InquiryList';
-import BannerMaster from './pages/cms/BannerMaster';
-import VideoGalleryMaster from './pages/cms/VideoGalleryMaster';
-import OurTeamMaster from './pages/cms/OurTeamMaster';
-import TravelInspirationList from './pages/cms/TravelInspirationList';
-import CustomizeTripList from './pages/cms/CustomizeTripList';
 import InvoiceGenerate from './pages/invoice/InvoiceGenerate';
 
 import B2BBookingFlow from './pages/b2b/BookingFlow';
@@ -68,12 +63,11 @@ import CreditNotes from './pages/invoice/CreditNotes';
 import ActivityLogs from './pages/admin/ActivityLogs';
 import ReportsHub from './pages/reports/ReportsHub';
 import ReportView from './pages/reports/ReportView';
+
 import OwnerLayout from './pages/owner/OwnerLayout';
 import OwnerDashboard from './pages/owner/OwnerDashboard';
 import MasterList from './pages/owner/MasterList';
 import MasterForm from './pages/owner/MasterForm';
-import MasterFormApp from './pages/owner/MasterFormApp';   // base-aware clone for the SA panel (req #5)
-import MasterHub from './pages/owner/MasterHub';           // SA "Master Data" hub (req #5)
 // Dedicated tabbed master forms (Account / Contact / Hotel) — reqs #3/#4/#5.
 import AccountForm from './pages/owner/forms/AccountForm';
 import ContactForm from './pages/owner/forms/ContactForm';
@@ -174,11 +168,6 @@ export default function App() {
         <Route path="cms/destinations" element={<DestinationMaster />} />
         <Route path="cms/packages" element={<PackageMaster />} />
         <Route path="cms/content" element={<ContentMaster />} />
-        <Route path="cms/banners" element={<BannerMaster />} />
-        <Route path="cms/videos" element={<VideoGalleryMaster />} />
-        <Route path="cms/team" element={<OurTeamMaster />} />
-        <Route path="cms/travel-inspiration" element={<TravelInspirationList />} />
-        <Route path="cms/customize-trip" element={<CustomizeTripList />} />
         <Route path="cms/bookings" element={<WebsiteBookings />} />
         <Route path="cms/other-pages" element={<OtherPages />} />
         <Route path="cms/inquiries" element={<InquiryList />} />
@@ -197,27 +186,13 @@ export default function App() {
             for the future per-user-rights extension point. */}
         <Route path="reports" element={<SAOnly><ReportsHub /></SAOnly>} />
         <Route path="reports/:id" element={<SAOnly><ReportView /></SAOnly>} />
+
         <Route path="admin/employees/new" element={<EmployeeForm />} />
         <Route path="admin/employees/:id" element={<EmployeeForm />} />
         {/* Company Owner account management — Super Admin only (req #3) */}
         <Route path="admin/company-owners" element={<SAOnly><CompanyOwnerList /></SAOnly>} />
         <Route path="admin/company-owners/new" element={<SAOnly><CompanyOwnerForm /></SAOnly>} />
         <Route path="admin/company-owners/:id" element={<SAOnly><CompanyOwnerForm /></SAOnly>} />
-
-        {/* req #5: the Company master modules, mounted INSIDE the Super Admin panel so navigation
-            stays in /app and never bounces to the Company Owner area. Same components + API as
-            /owner; the protected OwnerLayout.jsx / MasterForm.jsx are untouched (MasterFormApp is
-            a base-aware sibling). Super-Admin only. Static segments outrank the generic :key. */}
-        <Route path="master-data" element={<SAOnly><MasterHub /></SAOnly>} />
-        <Route path="master-data/account/create" element={<SAOnly><AccountForm /></SAOnly>} />
-        <Route path="master-data/account/:id/edit" element={<SAOnly><AccountForm /></SAOnly>} />
-        <Route path="master-data/contactHead/create" element={<SAOnly><ContactForm /></SAOnly>} />
-        <Route path="master-data/contactHead/:id/edit" element={<SAOnly><ContactForm /></SAOnly>} />
-        <Route path="master-data/hotelHead/create" element={<SAOnly><HotelForm /></SAOnly>} />
-        <Route path="master-data/hotelHead/:id/edit" element={<SAOnly><HotelForm /></SAOnly>} />
-        <Route path="master-data/:key" element={<SAOnly><MasterList /></SAOnly>} />
-        <Route path="master-data/:key/create" element={<SAOnly><MasterFormApp /></SAOnly>} />
-        <Route path="master-data/:key/:id/edit" element={<SAOnly><MasterFormApp /></SAOnly>} />
       </Route>
 
       <Route path="/portal/customer" element={<Protected roles={['RETAIL_CUSTOMER']}><CustomerPortal /></Protected>} />

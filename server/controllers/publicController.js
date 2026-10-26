@@ -10,6 +10,7 @@ import Banner from '../models/Banner.js';
 import VideoGallery from '../models/VideoGallery.js';
 import Wishlist from '../models/Wishlist.js';
 import OtherPage from '../models/OtherPage.js';
+
 import { sendMail } from '../utils/mailer.js';
 
 /**
@@ -18,13 +19,6 @@ import { sendMail } from '../utils/mailer.js';
  */
 
 const activeOnly = { isActive: true };
-
-// Build an absolute URL for a stored image path (/uploads/...). Leaves full URLs untouched.
-export const absoluteUrl = (req, p) => {
-  if (!p) return '';
-  if (/^https?:\/\//i.test(p)) return p;
-  return `${req.protocol}://${req.get('host')}${p.startsWith('/') ? '' : '/'}${p}`;
-};
 
 // Convert stored HTML (from the rich-text editor) to readable plain text:
 // drop tags, decode common entities, and tidy whitespace. Used only to shape API
@@ -100,11 +94,10 @@ export const getDestination = async (req, res) => {
  */
 export const destinationCategoriesList = async (req, res) => {
   const rows = await DestinationCategory.find(activeOnly)
-    .select('name slug image')
+    .select('name slug')
     .sort({ displayOrder: 1, name: 1 })
     .lean();
-  // v39: additionally return image_url (absolute). Existing fields are unchanged.
-  res.json(rows.map((c) => ({ name: c.name, slug: c.slug, image_url: absoluteUrl(req, c.image) })));
+  res.json(rows.map((c) => ({ name: c.name, slug: c.slug })));
 };
 
 /**
@@ -394,3 +387,4 @@ export const storeWishlist = async (req, res) => {
     res.status(400).json({ message: 'Could not add to wishlist.' });
   }
 };
+

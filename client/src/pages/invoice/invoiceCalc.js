@@ -15,12 +15,8 @@ export const applyFooter = (grossTotal, footer = {}) => {
   const tdsAmount = n(footer.tdsAmount);
   const tcsAmount = n(footer.tcsAmount);
   const govtTaxAmount = n(footer.govtTaxAmount);
-  // req #7: manual 360 service charge entered at billing time. Added to the net.
-  const serviceChargeAmount = n(footer.serviceChargeAmount);
-  const netInvoiceAmount = round2(
-    n(grossTotal) - discountAmount - tdsAmount - tcsAmount + govtTaxAmount + serviceChargeAmount
-  );
-  return { discountAmount, tdsAmount, tcsAmount, govtTaxAmount, serviceChargeAmount, netInvoiceAmount };
+  const netInvoiceAmount = round2(n(grossTotal) - discountAmount - tdsAmount - tcsAmount + govtTaxAmount);
+  return { discountAmount, tdsAmount, tcsAmount, govtTaxAmount, netInvoiceAmount };
 };
 
 // ---- Per-service charge-head definitions (keys used on the invoice screen) ----
