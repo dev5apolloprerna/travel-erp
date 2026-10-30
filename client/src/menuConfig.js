@@ -61,6 +61,8 @@ export const MENU = [
     items: [
       { key: 'admin-supplier-invoices', label: 'Supplier Invoices', to: '/app/org/supplier-invoices' },
       { key: 'admin-credit-notes', label: 'Credit Notes', to: '/app/invoices/credit-notes' },
+      // v65: Super-Admin only (key not in any user's menus / CO_ALLOWED, so only SA sees it).
+      { key: 'admin-club-invoices', label: 'Club Invoices', to: '/app/invoices/club' },
       { key: 'admin-settings', label: 'Company Profile', to: '/app/settings/company' },
     ],
   },
@@ -134,7 +136,7 @@ const MENU_ICONS = {
   'cms-categories': '🗂️', 'cms-destinations': '📍', 'cms-packages': '🧳', 'cms-content': '💬',
   'cms-banners': '🖼️', 'cms-videos': '🎬', 'cms-team': '👔', 'cms-travel-inspiration': '💡',
   'cms-customize-trip': '✏️', 'cms-bookings': '🌐', 'cms-other-pages': '📄', 'cms-inquiries': '📩',
-  'admin-supplier-invoices': '📥', 'admin-credit-notes': '🧾', 'admin-settings': '🏷️',
+  'admin-supplier-invoices': '📥', 'admin-credit-notes': '🧾', 'admin-club-invoices': '🔗', 'admin-settings': '🏷️',
   'my-profile': '👤', 'change-password': '🔑',
   'admin-company-owners': '👑', 'admin-services': '🧩', 'admin-employees': '👥',
   'admin-main-companies': '🏢', 'admin-activity-logs': '📜', 'admin-company-masters': '🗂️',

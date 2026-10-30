@@ -119,8 +119,10 @@ const pick = (...vals) => vals.find((v) => v !== undefined && v !== null && v !=
 const travelOn = (s, p) => pick(p?.travelDate, s?.travelDate, s?.journeyDate, s?.departureDate, s?.departDate, s?.date, s?.checkIn);
 
 // Load invoiced SALES orders in range (by invoiceDate).
+// v65: clubbed (superseded) source invoices are excluded so the consolidated invoice is counted
+// once — no double counting of revenue/GST/outstanding.
 async function loadSalesInvoices(req, from, to) {
-  const filter = scopeToOrg({ invoiceGenerated: true, invoiceCancelled: { $ne: true } }, req);
+  const filter = scopeToOrg({ invoiceGenerated: true, invoiceCancelled: { $ne: true }, clubbed: { $ne: true } }, req);
   const dr = dateRange(from, to);
   if (dr) filter.invoiceDate = dr;
   return Order.find(filter)

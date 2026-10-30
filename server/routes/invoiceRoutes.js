@@ -7,6 +7,10 @@ const r = Router();
 // Credit notes listing + document — declared before the '/:orderId' param route.
 r.get('/credit-notes', protect, c.listCreditNotes);
 r.get('/credit-notes/:id/pdf', protect, c.downloadCreditNote);
+// Multi-invoice clubbing (v65). Listing for the clubbing UI + the consolidate action.
+// Clubbing is a consolidation accounting action — Super-Admin only (like invoice cancel).
+r.get('/', protect, allow(ROLES.SUPER_ADMIN), c.listInvoices);
+r.post('/club', protect, allow(ROLES.SUPER_ADMIN), c.clubInvoices);
 // Any authenticated user may fetch an invoice they can reach
 // (staff from the order screen, customers from their portal).
 r.get('/:orderId', protect, c.getForInvoice);

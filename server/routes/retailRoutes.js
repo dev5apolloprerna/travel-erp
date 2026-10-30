@@ -13,6 +13,7 @@ const staffOrCustomer = allow(ROLES.EMPLOYEE, ROLES.SUPER_ADMIN, ROLES.COMPANY_O
 r.get('/customers', protect, staff, c.listCustomers);
 r.post('/customers', protect, staff, can('retail-customers', 'CREATE'), c.createCustomer);
 r.get('/customers/:id', protect, staff, c.getCustomer);
+r.get('/customers/:id/latest-passengers', protect, staff, c.latestPassengers);  // v65.1 auto-fill
 r.put('/customers/:id', protect, staff, can('retail-customers', 'EDIT'), c.updateCustomer);
 r.delete('/customers/:id', protect, staff, can('retail-customers', 'DELETE'), c.deleteCustomer);
 // customer documents (any type)

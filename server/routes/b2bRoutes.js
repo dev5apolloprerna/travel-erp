@@ -30,6 +30,7 @@ r.get('/companies/:id/passengers', protect, staff, c.listPassengers);
 r.post('/companies/:id/passengers', protect, staff, c.addPassenger);
 r.post('/companies/:id/payments', protect, staff, c.addLumpSumPayment);
 r.get('/companies/:id/orders', protect, staff, c.listCompanyOrders);
+r.get('/companies/:id/latest-passengers', protect, staff, c.companyLatestPassengers);  // v65.1 auto-fill
 
 // member documents
 r.get('/companies/:id/members/:memberId', protect, staff, c.getMember);

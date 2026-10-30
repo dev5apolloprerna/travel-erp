@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -27,11 +27,23 @@ export default function BookingFlow() {
   const [chosen, setChosen] = useState(null);            // selected Service master record (single mode)
   const [entries, setEntries] = useState([{ passengers: [{ name: '' }] }]);   // single-mode entries
   const [pkgLines, setPkgLines] = useState([blankPkgLine(), blankPkgLine()]);  // package-mode service lines
+  // v64: Package bookings share ONE passenger list across all services; each service keeps only
+  // its own service-specific fields. On save the shared list is applied to every package service.
+  const [pkgPassengers, setPkgPassengers] = useState([{ name: '' }]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustNote, setNewCustNote] = useState(null);
   const [editOrder, setEditOrder] = useState(null);     // raw order loaded for editing
+  // v65.1: passenger auto-fill from the customer's MOST RECENT eligible order (automatic — no
+  // manual order selection). `prefill` drives a small status/confirm banner.
+  const [prefill, setPrefill] = useState({ loading: false, note: '', error: '', conflict: null });
+  // v66.1: the auto-filled passenger list is a SEPARATE source of truth so a service (re)select
+  // never wipes it (single-mode `entries` are reset on service change). New entries seed from here.
+  const [basePassengers, setBasePassengers] = useState([{ name: '' }]);
+  const reqSeqRef = useRef(0);                 // guards against stale (out-of-order) responses
+  const stateRef = useRef({});
+  stateRef.current = { mode, entries, pkgPassengers, basePassengers };
 
   useEffect(() => {
     api.get('/retail/customers').then((r) => setCustomers(r.data));
@@ -50,12 +62,15 @@ export default function BookingFlow() {
       setInvoiceType(o.invoiceType || 'DOMESTIC');
       if (o.isPackage) {
         // Package edit: one package line per stored service (chosen service resolved once the
-        // service list is available, see below).
+        // service list is available, see below). Passengers are shared, so seed the shared list
+        // from the first service that has any (v64).
         setMode('package');
         setPkgLines((o.services || []).map((s) => {
           const { serviceType, serviceRef, _id, passengers, ...fields } = s;
-          return { serviceId: String(serviceRef?._id || serviceRef || ''), entry: { ...fields, passengers: passengers?.length ? passengers : [{ name: '' }] } };
+          return { serviceId: String(serviceRef?._id || serviceRef || ''), entry: { ...fields } };
         }));
+        const shared = (o.services || []).map((s) => s.passengers).find((p) => p?.length);
+        setPkgPassengers(shared?.length ? shared : [{ name: '' }]);
       } else {
         setMode('single');
         const ents = (o.services || []).map((s) => {
@@ -77,6 +92,56 @@ export default function BookingFlow() {
     if (svc) setChosen(svc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editOrder, services]);
+
+  // True if the user has already typed any passenger name (so we don't silently overwrite).
+  const hasTypedPassengers = () => {
+    const st = stateRef.current;
+    return st.mode === 'package'
+      ? (st.pkgPassengers || []).some((p) => p.name?.trim())
+      : (st.entries || []).some((e) => (e.passengers || []).some((p) => p.name?.trim()));
+  };
+  const clonePax = (arr) => (arr || []).map((p) => ({ ...p }));
+  const applyPassengers = (pax) => {
+    const st = stateRef.current;
+    setBasePassengers(clonePax(pax));                        // survives service resets
+    if (st.mode === 'package') setPkgPassengers(clonePax(pax));
+    else setEntries((prev) => (prev.length ? prev : [{}]).map((e) => ({ ...e, passengers: clonePax(pax) })));
+  };
+  // Passengers a freshly-(re)selected service entry should start with: whatever the user has
+  // already typed, else the auto-filled base, else one blank row. Keeps passengers across service
+  // changes and makes them appear on the first service selection regardless of fetch timing.
+  const seedPassengers = () => {
+    const st = stateRef.current;
+    const typed = (st.entries || []).flatMap((e) => e.passengers || []).filter((p) => p.name?.trim());
+    if (typed.length) return clonePax(typed);
+    const base = (st.basePassengers || []).filter((p) => p.name?.trim());
+    return base.length ? clonePax(base) : [{ name: '' }];
+  };
+
+  // v65.1: when the customer is selected/changed, auto-fill from their most recent eligible order.
+  // Skipped while editing (an existing order keeps its own passengers). Stale responses are ignored.
+  useEffect(() => {
+    if (editId) return;
+    const seq = (reqSeqRef.current += 1);
+    setPrefill({ loading: false, note: '', error: '', conflict: null });
+    if (!customerId) return;
+    setPrefill({ loading: true, note: '', error: '', conflict: null });
+    api.get(`/retail/customers/${customerId}/latest-passengers`)
+      .then((r) => {
+        if (seq !== reqSeqRef.current) return;         // a newer customer was selected — drop this
+        const pax = r.data?.passengers || [];
+        const source = r.data?.sourceOrder || null;
+        if (!pax.length) { setPrefill({ loading: false, note: 'No previous passenger details found for this customer.', error: '', conflict: null }); return; }
+        if (hasTypedPassengers()) {
+          setPrefill({ loading: false, note: '', error: '', conflict: { source, passengers: pax } });
+        } else {
+          applyPassengers(pax);
+          setPrefill({ loading: false, note: `Auto-filled ${pax.length} passenger(s) from ${source?.no || 'the latest order'}. Review and edit as needed.`, error: '', conflict: null });
+        }
+      })
+      .catch(() => { if (seq === reqSeqRef.current) setPrefill({ loading: false, note: '', error: 'Could not load previous passenger details.', conflict: null }); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, editId]);
 
   const isAdmin = user?.role === 'SUPER_ADMIN' || (user?.menus || []).includes('ALL');
   const allowedIds = (user?.services || []).map((sv) => String(sv._id || sv));
@@ -108,11 +173,15 @@ export default function BookingFlow() {
     const { passengers = [], ...fields } = entry;
     return { serviceType: chosen.name.toUpperCase(), serviceRef: chosen._id, ...fields, passengers: passengers.filter((p) => p.name?.trim()) };
   });
-  const buildPackageServices = () => pkgLines.map((b) => {
-    const svc = svcById(b.serviceId);
-    const { passengers = [], ...fields } = b.entry || {};
-    return { serviceType: svc.name.toUpperCase(), serviceRef: svc._id, ...fields, passengers: passengers.filter((p) => p.name?.trim()) };
-  });
+  // v64: every package service receives the SHARED passenger list (entered once).
+  const buildPackageServices = () => {
+    const shared = pkgPassengers.filter((p) => p.name?.trim());
+    return pkgLines.map((b) => {
+      const svc = svcById(b.serviceId);
+      const { passengers, ...fields } = b.entry || {};   // drop any per-line passengers
+      return { serviceType: svc.name.toUpperCase(), serviceRef: svc._id, ...fields, passengers: shared };
+    });
+  };
 
   const save = async () => {
     setError('');
@@ -122,9 +191,15 @@ export default function BookingFlow() {
     if (mode === 'package') {
       if (pkgLines.length < 2) return setError('A package must contain at least two services.');
       if (pkgLines.some((b) => !b.serviceId)) return setError('Please choose a service for every package line.');
+      // v64: shared passenger details are mandatory for the package.
+      if (!pkgPassengers.some((p) => p.name?.trim())) return setError('Passenger details are required: add at least one passenger for the package.');
       payload = { customerId, invoiceType, isPackage: true, services: buildPackageServices() };
     } else {
       if (!chosen) return setError('Please select a service.');
+      // v64: Retail bookings require at least one named passenger per service entry.
+      if (entries.some((e) => !(e.passengers || []).some((p) => p.name?.trim()))) {
+        return setError('Passenger details are required: add at least one passenger name for every entry.');
+      }
       payload = { customerId, invoiceType, isPackage: false, services: buildSingleServices() };
     }
 
@@ -181,6 +256,24 @@ export default function BookingFlow() {
           </div>
         </div>
 
+        {/* v65.1: passengers auto-fill from the customer's most recent order (no manual pick). */}
+        {customerId && !editId && (prefill.loading || prefill.note || prefill.error || prefill.conflict) && (
+          <div className="mt-4 rounded-lg border border-line bg-faint px-3 py-2 text-xs">
+            {prefill.loading && <span className="text-ink-muted">Checking for previous passenger details…</span>}
+            {prefill.error && <span className="text-red-600">{prefill.error}</span>}
+            {prefill.note && <span className="text-brand">{prefill.note}</span>}
+            {prefill.conflict && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-ink-soft">
+                  Found {prefill.conflict.passengers.length} passenger(s) from {prefill.conflict.source?.no || 'a previous order'}. Replace the details you've entered?
+                </span>
+                <button type="button" className="btn-ghost btn-sm" onClick={() => { applyPassengers(prefill.conflict.passengers); setPrefill((p) => ({ loading: false, error: '', conflict: null, note: `Applied ${p.conflict.passengers.length} passenger(s) from ${p.conflict.source?.no || 'the latest order'}.` })); }}>Apply</button>
+                <button type="button" className="btn-ghost btn-sm" onClick={() => setPrefill((p) => ({ ...p, conflict: null }))}>Keep mine</button>
+              </div>
+            )}
+          </div>
+        )}
+
         <p className="mt-3 text-xs text-ink-muted">
           Services are drawn from the Service Master. Price and tax are added later when the invoice is generated.
         </p>
@@ -210,24 +303,27 @@ export default function BookingFlow() {
                   )}
                 </div>
                 {svc ? (
-                  <>
-                    <ServiceBookingForm serviceName={svc.name} value={b.entry} onChange={(next) => setLine(i, { entry: next })} />
-                    <div className="mt-4">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Passengers</div>
-                      {(b.entry.passengers || []).map((p, pi) => (
-                        <PassengerFields key={pi} value={p} index={pi}
-                          onChange={(next) => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).map((x, xi) => (xi === pi ? next : x)) } })}
-                          onRemove={(b.entry.passengers || []).length > 1 ? () => setLine(i, { entry: { ...b.entry, passengers: (b.entry.passengers || []).filter((_, xi) => xi !== pi) } }) : undefined} />
-                      ))}
-                      <button type="button" onClick={() => setLine(i, { entry: { ...b.entry, passengers: [...(b.entry.passengers || []), { name: '' }] } })} className="btn-ghost btn-sm">+ Add passenger</button>
-                    </div>
-                  </>
+                  <ServiceBookingForm serviceName={svc.name} value={b.entry} onChange={(next) => setLine(i, { entry: next })} />
                 ) : <p className="text-sm text-ink-muted">Choose a service to enter its booking details.</p>}
               </Card>
             );
           })}
 
           <button type="button" onClick={addLine} className="btn-accent btn-sm">+ Add service to package</button>
+
+          {/* v64: ONE shared passenger section for the whole package. Entered once and applied
+              to every service above — service-specific details stay on each service card. */}
+          <Card title="Passengers — shared across all package services">
+            <p className="mb-3 text-xs text-ink-muted">
+              Enter passenger details once here; they apply to every service in this package. Each service keeps its own booking details above.
+            </p>
+            {pkgPassengers.map((p, pi) => (
+              <PassengerFields key={pi} value={p} index={pi}
+                onChange={(next) => setPkgPassengers((prev) => prev.map((x, xi) => (xi === pi ? next : x)))}
+                onRemove={pkgPassengers.length > 1 ? () => setPkgPassengers((prev) => prev.filter((_, xi) => xi !== pi)) : undefined} />
+            ))}
+            <button type="button" onClick={() => setPkgPassengers((prev) => [...prev, { name: '' }])} className="btn-ghost btn-sm">+ Add passenger</button>
+          </Card>
 
           <div className="flex gap-2">
             <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : (editId ? 'Update package' : 'Save package booking')}</button>
@@ -245,7 +341,7 @@ export default function BookingFlow() {
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {bookable.map((s) => (
-                <button key={s._id} onClick={() => { setChosen(s); setEntries([{ passengers: [{ name: '' }] }]); }}
+                <button key={s._id} onClick={() => { setChosen(s); setEntries([{ passengers: seedPassengers() }]); }}
                   className="card flex flex-col items-center gap-1 py-5 text-sm font-semibold text-ink-soft transition hover:border-brand hover:text-brand">
                   <span className="text-2xl">{iconFor(s.name)}</span>
                   {s.name}
@@ -259,7 +355,7 @@ export default function BookingFlow() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl2 border border-brand/30 bg-brand-light/40 px-4 py-2.5">
             <span className="text-sm font-semibold text-ink">Selected service: <span className="text-brand">{chosen.name}</span></span>
-            <button onClick={() => { setChosen(null); setEntries([{ passengers: [{ name: '' }] }]); }} className="btn-ghost btn-sm">← Change Service</button>
+            <button onClick={() => { setChosen(null); setEntries([{ passengers: seedPassengers() }]); }} className="btn-ghost btn-sm">← Change Service</button>
           </div>
           <Card title={`${chosen.name} details — ${typeLabel}`}>
             <MultiEntryBookingForm serviceName={chosen.name} entries={entries} onChange={setEntries} />
@@ -267,7 +363,7 @@ export default function BookingFlow() {
 
           <div className="flex gap-2">
             <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : (editId ? 'Update booking' : 'Save booking')}</button>
-            <button onClick={() => { setChosen(null); setEntries([{ passengers: [{ name: '' }] }]); }} className="btn-ghost">← Change Service</button>
+            <button onClick={() => { setChosen(null); setEntries([{ passengers: seedPassengers() }]); }} className="btn-ghost">← Change Service</button>
           </div>
         </div>
       )}
