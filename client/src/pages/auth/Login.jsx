@@ -71,16 +71,16 @@ export default function Login() {
 
           <button className="btn-primary mt-6 w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
 
-          <div className="mt-4 rounded-lg border border-line bg-white px-3 py-2 text-xs text-ink-muted">
+          {/* <div className="mt-4 rounded-lg border border-line bg-white px-3 py-2 text-xs text-ink-muted">
             Demo login: <span className="font-medium text-ink-soft">{cfg.hint}</span>
-          </div>
+          </div> */}
 
           <div className="mt-6 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
-            <Link to="/login/superadmin" className="hover:text-brand">Super Admin</Link>
-            <Link to="/login/employee" className="hover:text-brand">Employee</Link>
-            <Link to="/login/retail" className="hover:text-brand">Customer</Link>
-            <Link to="/login/b2b" className="hover:text-brand">B2B Member</Link>
-            <Link to="/login/companyowner" className="hover:text-brand">Company Owner</Link>
+            <Link to="/login/superadmin" className="hover:text-brand"><strong>Super Admin</strong></Link>
+            <Link to="/login/employee" className="hover:text-brand"><strong>Employee</strong></Link>
+            <Link to="/login/retail" className="hover:text-brand"><strong>Customer</strong></Link>
+            <Link to="/login/b2b" className="hover:text-brand"><strong>B2B Member</strong></Link>
+            <Link to="/login/companyowner" className="hover:text-brand"><strong>Company Owner</strong></Link>
           </div>
         </form>
       </div>

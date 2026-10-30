@@ -6,6 +6,7 @@ import User, { ROLES } from '../models/User.js';
 import Service from '../models/Service.js';
 import Settings from '../models/Settings.js';
 import { applyGstToServices, isInterState } from '../utils/gst.js';
+import { validateBookingPassengers, extractOrderPassengers } from '../utils/bookingValidation.js';
 import { publicUrl, removeFile } from '../utils/upload.js';
 import { sendCredentialsMail } from '../utils/mailer.js';
 import { scopeToOrg, ownsOrg } from '../middleware/auth.js';
@@ -134,6 +135,30 @@ export const deleteCompanyDocument = async (req, res) => {
   res.json(company.documents);
 };
 
+/**
+ * GET /api/b2b/companies/:id/latest-passengers?excludeOrder=
+ * v65.1: passengers from this company's MOST RECENT eligible order, for auto-filling
+ * a new B2B booking. Company ownership is verified (tenant-safe); single query.
+ */
+export const companyLatestPassengers = async (req, res) => {
+  const company = await loadOwnedCompany(req.params.id, req);
+  if (!company) return res.status(404).json({ message: 'Company not found' });
+  const filter = { module: 'B2B', companyId: company._id, 'services.passengers.0': { $exists: true } };
+  if (req.query.excludeOrder) filter._id = { $ne: req.query.excludeOrder };
+  const orders = await Order.find(filter)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(5)
+    .select('orderNo invoiceNo createdAt services.serviceType services.passengers')
+    .lean();
+  for (const o of orders) {
+    const passengers = extractOrderPassengers(o);
+    if (passengers.length) {
+      return res.json({ sourceOrder: { id: o._id, no: o.orderNo || o.invoiceNo || '', date: o.createdAt }, passengers });
+    }
+  }
+  return res.json({ sourceOrder: null, passengers: [] });
+};
+
 // ---- Passenger DB (scoped per company) ----
 export const listPassengers = async (req, res) => {
   const company = await loadOwnedCompany(req.params.id, req);
@@ -155,6 +180,10 @@ export const createOrder = async (req, res) => {
   // The booking's company must belong to the caller's org — never trust companyId blindly (req #7).
   const company = await loadOwnedCompany(companyId, req);
   if (!company) return res.status(404).json({ message: 'Company not found' });
+
+  // v64: B2B bookings require passenger details (≥1 named passenger per service).
+  const paxErr = validateBookingPassengers(services);
+  if (paxErr) return res.status(400).json({ message: paxErr });
 
   // Orders capture booking details only — no amount, no tax (added at invoice time).
   let invoiceType = selectedType || 'DOMESTIC';
@@ -204,6 +233,8 @@ export const addLumpSumPayment = async (req, res) => {
     // so a payment can never be applied to another company's / org's order (req #7).
     const order = await Order.findOne({ _id: a.orderId, companyId: company._id });
     if (!order) return res.status(400).json({ message: 'One of the selected orders no longer exists' });
+    // v65: don't allocate to a clubbed (superseded) invoice — use the consolidated one.
+    if (order.clubbed) return res.status(400).json({ message: `Invoice ${order.invoiceNo || order.orderNo} was clubbed; allocate to its consolidated invoice instead.` });
 
     const due = (order.totalAmount || 0) - (order.paidAmount || 0);
     if (amt > due + 0.01) {

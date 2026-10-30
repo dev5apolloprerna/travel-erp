@@ -2694,3 +2694,265 @@ keeps its own values; multiple passengers don't overwrite each other.
 Verified: `vite build` OK; `node --check` on changed server files; schema
 validation test (blank + filled dates) passes; charge-head breakdown reconciles
 to Net; grouped PDF renders.
+
+---
+
+## v63 — Professional Sales report PDFs (layout + pagination fixes)
+
+Rebuilt the report PDF layout engine (`server/utils/reportPdf.js`) to fix the
+Sales Register / Summary / Detail PDFs. **No data, calculations, columns, filters,
+grouping, subtotals or totals changed** — layout only.
+
+### Root causes fixed
+1. **Wrapping headings & values** — column widths were fixed proportional shares,
+   far narrower than content (e.g. `13,420.00`, "Basic Amount"), so text wrapped.
+   Now widths are **measured from real content** (header words + values + totals);
+   numeric/identifier values are kept on one line and never wrap.
+2. **Blank trailing page** — two causes: (a) measuring column widths before the
+   first page made PDFKit emit a stray default-size page — now measured on a
+   dedicated throwaway document; (b) the footer was drawn below the bottom margin,
+   spilling onto a new page — now drawn inside a reserved footer band.
+
+### Layout improvements
+- **Orientation chosen per report, only when needed:** narrow reports stay A4
+  **portrait**; the wide financial tables (Register 14 cols, Summary 12, Detail 18)
+  render A4 **landscape** at a readable 8 pt — they cannot fit portrait without
+  wrapping. Font is never shrunk to unreadable.
+- **Headers wrap to two lines** (e.g. "Basic / Amount", "Government / Tax") instead
+  of being clipped; values stay single-line. Right-aligned numbers, left-aligned
+  text, consistent padding, alternating row stripes, clear group headers,
+  subtotals and grand total.
+- **Content-aware column widths** that never exceed the usable page width; numeric
+  columns are protected, long free text (passenger/ticket) is ellipsised only when
+  a very wide report (Detail = 18 cols) genuinely can't fit otherwise.
+- **Pagination:** column header repeats on each page with a "(continued)" note,
+  rows are never split, group headers are kept with at least one row, "Page X of Y"
+  footers, and no clipped/overflowing content.
+
+Verified by rendering the Register/Summary/Detail with the screenshot's sample data
+(all single-page, no wrapping, no blank page) and a 90-row register (4 pages,
+headers repeated, no blank page).
+
+**Note on Sales Detail:** 18 columns need ~1030 pt but A4 landscape offers 770 pt,
+so Ticket No / PNR / Sector are ellipsised. If those identifiers must always show
+in full, options are a wider page size or splitting Detail across two column groups
+— tell me which you prefer.
+
+---
+
+## v64 — Mandatory passenger details (B2B/Retail) + package shared passengers
+
+Two of the three requested booking features (multi-invoice clubbing follows next,
+per the confirmed sequence). Society bookings are deliberately untouched.
+
+### Mandatory passenger details — B2B & Retail only (not Society)
+A booking for RETAIL or B2B can no longer be completed unless every service has at
+least one passenger with a name. Enforced on **both** sides:
+- **Backend** (authoritative): new `server/utils/bookingValidation.js`
+  (`validateBookingPassengers`) called in `retailController.createOrder` +
+  `updateOrder` and `b2bController.createOrder`. Returns a clear 400 message naming
+  the service that's missing a passenger. **Society (FIT) is not validated** — its
+  passenger is the searched member (societyPassenger), so `fitController` never
+  calls the validator and the shared passenger form runs with `withPassengers=false`.
+- **Frontend**: Retail and B2B booking forms block save and show the message beside
+  the existing error area. Passport/DOB/etc. stay optional (passport is never
+  forced); only a passenger name is required, so no unrelated fields are demanded.
+
+### Package booking — shared passengers across services (Package only)
+In a Retail **package** booking, passenger details are now entered **once** in a
+single "Passengers — shared across all package services" section, instead of per
+service. Each service card keeps only its own service-specific fields.
+- On save, the shared passenger list is applied to **every** service in the package,
+  so the existing service-level passenger association is preserved (vouchers,
+  reports and PDFs that read `service.passengers` keep working unchanged — no schema
+  change, no duplicate records).
+- On edit, the shared list is seeded from the package's stored passengers.
+- Scope is strictly package mode: single-service Retail, B2B and Society booking
+  workflows are unchanged.
+
+Files: new `server/utils/bookingValidation.js`; `server/controllers/retailController.js`,
+`server/controllers/b2bController.js`, `client/src/pages/retail/BookingFlow.jsx`,
+`client/src/pages/b2b/BookingFlow.jsx`. Verified: `node --check`, validator unit
+tests (named/blank/missing/package cases), `vite build` OK.
+
+---
+
+## v65 — Multi-invoice clubbing + passenger auto-fill from existing orders
+
+### Multi-invoice clubbing (Super Admin)
+Consolidate several eligible invoices into one, using the confirmed **supersede &
+lock** accounting model.
+- **New UI**: Account → **Club Invoices** (Super-Admin only). Lists generated
+  invoices with party/total/paid/balance/status; tick 2+ eligible invoices of the
+  **same customer/company** and click *Club selected*. Cross-party and ineligible
+  invoices are disabled with a reason tooltip; a running total of the selection is
+  shown; the resulting consolidated invoice opens as a PDF.
+- **Model**: sources are kept for audit, flagged `clubbed`, locked and removed from
+  outstanding; a new consolidated invoice (`isClubbedInvoice`, number `CLB-######`)
+  carries the summed figures and `clubbedFromIds`/`clubbedFromNos` back-references.
+  Paid amounts on the sources **carry over**, so the consolidated balance is correct.
+- **Eligibility** (backend-enforced): same party, same booking type, invoice
+  generated, not cancelled / invoice-cancelled, no credit note, not already clubbed
+  or itself consolidated, and not already fully PAID (UNPAID/PARTIAL only).
+- **No double counting**: sales/outstanding reports exclude `clubbed` sources and
+  count only the consolidated invoice (its figures = sum of sources). Payments and
+  invoice-cancel on a clubbed source are rejected (act on the consolidated instead).
+- **Integrity**: the consolidate action creates the invoice then locks the sources
+  with a compensating rollback (deletes the consolidated + unlocks sources) if any
+  step fails, so it is all-or-nothing. Guarded by Super-Admin on the backend.
+- **Model fields** (additive, `Order`): `clubbed`, `clubbedAt`, `clubbedIntoId`,
+  `isClubbedInvoice`, `clubbedFromIds`, `clubbedFromNos`. No migration (schemaless).
+
+### Passenger auto-fill from an existing order (B2B & Retail, not Society)
+When creating a Retail or B2B booking, a **"Prefill passengers from a previous
+order"** selector appears once the customer/company is chosen. It lists that party's
+past orders; picking one copies its unique passengers (all six fields) into the
+passenger section for review/edit.
+- Retail single mode fills every entry; Retail **package** mode fills the shared
+  passenger list; B2B fills its entries. Only triggered on an explicit pick (never
+  silently), and new passenger rows are created (source subdoc ids are stripped — no
+  duplicate/linked records). Orders with no passengers are handled gracefully.
+- **Society (FIT) is untouched** — the feature lives only in the Retail and B2B
+  booking forms; FIT has no such selector and its workflow is unchanged.
+
+Files: `server/models/Order.js`, `server/controllers/invoiceController.js`
+(`listInvoices`, `clubInvoices`), `server/routes/invoiceRoutes.js`,
+`server/controllers/retailController.js` + `b2bController.js` (clubbed-payment
+guards), `server/reports/runners.js` (exclude clubbed), `client/src/pages/invoice/
+ClubInvoices.jsx` (new), `client/src/menuConfig.js`, `client/src/App.jsx`,
+`client/src/pages/retail/BookingFlow.jsx`, `client/src/pages/b2b/BookingFlow.jsx`.
+Verified: `node --check`, route introspection, eligibility + aggregation unit tests,
+`vite build` OK.
+
+**Limitation / note:** clubbing runs with a compensating rollback rather than a
+Mongo multi-document transaction (the dev deployment is standalone, where
+transactions aren't available); on a replica-set deployment this can be upgraded to
+a session transaction. Un-clubbing (reversing a consolidation) isn't included —
+tell me if you want it.
+
+---
+
+## v66 — Automatic passenger auto-fill from the customer's most recent order
+
+Reworks the v65 passenger prefill: instead of a manual "pick a previous order"
+dropdown, Retail and B2B bookings now **automatically** fill passengers from the
+selected customer's / company's **most recent eligible order**. (Multi-invoice
+clubbing was delivered in v65 and is unchanged.)
+
+### Behaviour
+- **Trigger**: when the customer (Retail) or company (B2B) is selected or changed on
+  a NEW booking, the latest eligible order's passengers are fetched and filled in.
+  Editing an existing order is skipped (it keeps its own passengers). Society/FIT has
+  no such logic and is untouched.
+- **"Most recent eligible order"** = the newest order of that exact customer/company
+  that actually has named passengers (`createdAt` desc, `_id` tie-break), returning
+  only the six supported passenger fields, de-duplicated by name.
+- **No silent overwrite**: if the form already has typed passenger names, the fill is
+  **not** applied automatically — a banner offers *Apply* (replace) or *Keep mine*.
+  With an empty form it fills silently and shows which order it came from.
+- **Race-safe**: each customer change bumps a request sequence; out-of-order responses
+  from a previously selected customer are ignored, so data never crosses customers.
+- **States**: loading ("Checking for previous passenger details…"), empty ("No
+  previous passenger details found…") and error messages are shown. The old manual
+  dropdown is removed.
+
+### Backend (new, tenant-scoped, single query — no N+1)
+- `GET /api/retail/customers/:id/latest-passengers` → `retailController.latestPassengers`
+- `GET /api/b2b/companies/:id/latest-passengers` → `b2bController.companyLatestPassengers`
+  Both are staff-only, org/ownership-scoped, use a `services.passengers.0 exists` filter
+  with `sort({createdAt:-1,_id:-1}).limit(5)`, and return `{ sourceOrder, passengers }`
+  via the shared `extractOrderPassengers` helper (only the supported fields, no
+  subdocument ids → no duplicate passenger records).
+
+Files: `server/utils/bookingValidation.js` (`extractOrderPassengers`),
+`server/controllers/retailController.js`, `server/controllers/b2bController.js`,
+`server/routes/retailRoutes.js`, `server/routes/b2bRoutes.js`,
+`client/src/pages/retail/BookingFlow.jsx`, `client/src/pages/b2b/BookingFlow.jsx`.
+No DB migration. Verified: `node --check`, route introspection, extractor unit test
+(dedupe + field whitelist), `vite build` OK.
+
+---
+
+## v67 — Fix: passenger auto-fill now loads reliably on customer select
+
+Fixes the intermittent auto-fill reported after v66 (passengers only appearing
+after changing the service, or not at all).
+
+### Root cause
+In **single-service** mode the passenger rows are stored inside `entries`, but
+selecting a service — and the "Change Service" buttons — reset `entries` to a blank
+`[{ passengers: [{ name: '' }] }]`. The customer auto-fill effect only runs on
+**customer** change, not service change. So the async prefill response raced the
+service reset: if it landed before the service was picked, the reset wiped it
+(passengers never showed); if it landed after, they appeared — hence "only after I
+change the service," intermittently. (Package mode was unaffected — it uses a
+separate shared-passenger state; Society has no auto-fill.)
+
+### Fix
+The auto-filled passengers are now held in a dedicated `basePassengers` source of
+truth, separate from the service-coupled `entries`:
+- Selecting/!re-selecting a service seeds its entry's passengers from
+  **already-typed passengers → the auto-filled base → one blank row**, so passengers
+  survive every service change and appear on the **first** service selection.
+- When a service is already chosen, the prefill response also applies straight to
+  the current entries, so it shows without re-selecting a service regardless of
+  response timing (race resolved).
+- No silent overwrite (the Apply/Keep-mine confirm is unchanged), stale responses
+  are still dropped by the request-sequence guard, and empty/loading/error states
+  remain. Society and the edit flow are untouched.
+
+Files: `client/src/pages/retail/BookingFlow.jsx`, `client/src/pages/b2b/BookingFlow.jsx`
+(frontend only — no backend/API/schema changes). Verified: `vite build` OK.
+
+---
+
+## v68 — Club Invoice reworked for unpaid, un-invoiced orders
+
+Per the updated business rule, **Club Invoice now combines multiple created-but-not-
+yet-invoiced, UNPAID orders of the same customer / B2B company into ONE invoice** —
+instead of consolidating already-generated invoices (the v65 behaviour). This is why
+the previous page wouldn't let you club unpaid orders: its backend only listed and
+accepted orders where `invoiceGenerated: true`, so un-invoiced orders never appeared
+and were rejected as "has no generated invoice". That eligibility is now inverted.
+
+### Eligibility (backend-enforced, matches the requested table)
+An order is clubbable only when: **no invoice generated yet**, **unpaid**
+(`UNPAID` / `paidAmount` = 0 — partially‑paid is *not* treated as unpaid), not
+cancelled, not on hold, and not already clubbed. All selected orders must share the
+**same single party** (one Retail customer *or* one B2B company — never mixed) and the
+same booking type. Verified against every row of the spec's status/invoice table.
+
+### How clubbing works (reuses existing invoice generation — no duplicated accounting)
+Because this ERP enters amounts/taxes at invoice-generation time (an un-invoiced order
+has no amount yet), clubbing:
+1. Builds **one consolidated *package* order** holding all the selected orders' service
+   lines (each tagged with its `_sourceOrderNo`), linked via `clubbedFromIds` /
+   `clubbedFromNos`.
+2. **Locks the source orders** (`clubbed` + `clubbedIntoId`) so they can't be invoiced,
+   edited, deleted or clubbed again. The lock is applied with an `updateMany` whose
+   filter re-asserts eligibility, so simultaneous/duplicate submissions fail cleanly;
+   a compensating rollback removes the consolidated order if any step fails.
+3. Sends you to the **existing invoice-generation screen** for that package order, where
+   you enter one amount per service and generate a single combined invoice using the
+   existing pricing/tax/discount/number logic. Reports count only that one invoice (the
+   un-invoiced sources never contributed), so no revenue/GST is double-counted.
+
+**Single-order invoice generation is completely unchanged.**
+
+### UI (same page, same styling)
+The Club Invoices page now lists uninvoiced, unpaid **orders** (Order No, Date,
+Customer/Company, Services, Status); selection is restricted to one customer/company;
+"Club selected" creates the combined order and opens its invoice screen. Clubbed orders
+stay listed (greyed) and traceable. Guards added so a clubbed source order can't be
+separately invoiced/edited/deleted.
+
+Files: `server/controllers/invoiceController.js` (clubbingIssue / listInvoices /
+clubInvoices reworked, generate guard), `server/controllers/retailController.js`
+(edit/delete guards), `client/src/pages/invoice/ClubInvoices.jsx`. No schema change —
+reuses the v65 `clubbed`/`clubbedIntoId`/`isClubbedInvoice`/`clubbedFromIds` fields.
+Verified: `node --check`, controller/route load, eligibility-table unit test, `vite build` OK.
+
+**Limitation:** clubbing + locking uses a compensating rollback (standalone Mongo, no
+multi-doc transaction). If you club orders but then abandon the invoice screen, the
+consolidated package order remains ready to invoice later (the sources stay merged into
+it) — open it from the order list and generate when ready.

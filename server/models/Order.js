@@ -126,6 +126,19 @@ const orderSchema = new mongoose.Schema(
     paidAmount: { type: Number, default: 0 },
     status: { type: String, enum: ['UNPAID', 'PARTIAL', 'PAID'], default: 'UNPAID' },
 
+    // ---- Multi-invoice clubbing (v65) ----
+    // A set of eligible invoices can be consolidated into ONE new invoice. The sources are kept for
+    // audit, flagged `clubbed` + locked, and removed from outstanding (they no longer carry a
+    // receivable). The consolidated invoice (`isClubbedInvoice`) carries the combined receivable and
+    // links back to its sources. No revenue/GST/payment is double-counted — reports exclude clubbed
+    // sources and show only the consolidated invoice.
+    clubbed: { type: Boolean, default: false },                  // this invoice was superseded by a consolidated one
+    clubbedAt: { type: Date, default: null },
+    clubbedIntoId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
+    isClubbedInvoice: { type: Boolean, default: false },         // this IS a consolidated invoice
+    clubbedFromIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'Order', default: undefined },
+    clubbedFromNos: { type: [String], default: undefined },
+
     // ---- Cancellation (req #2, v32) ----
     // An order may be CANCELLED only AFTER its invoice has been generated. This is a soft
     // cancel (the record is kept for audit / invoice history), distinct from a hard Delete.

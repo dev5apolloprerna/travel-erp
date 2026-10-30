@@ -7,7 +7,8 @@ import CreditNote from '../models/CreditNote.js';
 import { ensureCreditNoteForOrder } from '../services/creditNoteService.js';
 import { buildInvoicePdf, invoiceToBuffer } from '../utils/invoicePdf.js';
 import { sendMail } from '../utils/mailer.js';
-import { ownsOrg } from '../middleware/auth.js';
+import { ownsOrg, scopeToOrg } from '../middleware/auth.js';
+import { resolveOrgId } from '../utils/orgContext.js';
 import { computeService, applyFooter } from '../invoiceCalc.js';
 import { SERVICE_CHARGES } from '../invoiceCalc.js';
 import { logActivity } from '../utils/activityLog.js';
@@ -202,6 +203,9 @@ export const generateInvoiceNo = async (req, res) => {
     return res.status(400).json({ message: 'This order has been cancelled and cannot be invoiced.' });
   if (order.invoiceCancelled)
     return res.status(400).json({ message: 'This invoice was cancelled (a credit note was raised) and cannot be regenerated.' });
+  // v68: a source order that has been clubbed is billed through its consolidated (club) order.
+  if (order.clubbed)
+    return res.status(400).json({ message: 'This order was clubbed into a combined invoice. Generate the invoice on the clubbed (consolidated) order instead.' });
 
   // req #3: a PACKAGE order is billed as one amount per included service. The gross is the sum of
   // those per-service amounts (recomputed on the backend — client totals are never trusted); the
@@ -296,6 +300,10 @@ export const cancelInvoice = async (req, res) => {
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
   if (!order.invoiceGenerated)
     return res.status(400).json({ message: 'This order has no generated invoice to cancel.' });
+  // v65: a clubbed (superseded) source invoice can't be cancelled on its own — act on its
+  // consolidated invoice instead.
+  if (order.clubbed)
+    return res.status(400).json({ message: 'This invoice was clubbed into a consolidated invoice and cannot be cancelled directly.' });
   // Idempotency: if already cancelled, return the existing credit note instead of raising a new one
   // (prevents duplicate credit notes when the action is triggered more than once).
   if (order.invoiceCancelled) {
@@ -379,4 +387,168 @@ export const downloadCreditNote = async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${cn.creditNoteNo}.pdf"`);
   buildInvoicePdf({ order, settings: data.settings, party: data.party, docTitle: 'CREDIT NOTE' }, res);
+};
+
+// =============================================================================
+//  MULTI-INVOICE CLUBBING (v65)
+// -----------------------------------------------------------------------------
+//  Consolidate several eligible invoices into ONE new invoice. Business rules
+//  (confirmed with the client):
+//   - Model: SUPERSEDE & LOCK. Sources are kept for audit, flagged `clubbed`,
+//     locked, and removed from outstanding; the consolidated invoice carries the
+//     combined receivable and links back to its sources (full traceability).
+//   - Eligibility: same party (customer or company); invoice generated; NOT
+//     cancelled / invoice-cancelled; NO credit note; NOT already clubbed and NOT
+//     itself a consolidated invoice; NOT already fully PAID (UNPAID/PARTIAL only).
+//     Partial payments carry over to the consolidated invoice's paid amount.
+//   - No revenue/GST/payment double counting: reports exclude clubbed sources and
+//     count only the consolidated invoice (whose figures are the sum of sources).
+// =============================================================================
+
+const partyKeyOf = (o) => (o.customerId ? `C:${o.customerId}` : (o.companyId ? `B:${o.companyId}` : 'NONE'));
+
+/**
+ * Why (if at all) an ORDER is ineligible for Club Invoice. Returns a string or null.
+ * v68 rule: a club invoice combines created-but-NOT-yet-invoiced, UNPAID orders of the
+ * same customer/company. Orders that already have an invoice are never eligible.
+ */
+const clubbingIssue = (o) => {
+  if (o.invoiceGenerated) return 'already has an invoice';
+  if (o.cancelled) return 'is cancelled';
+  if (o.onHold) return 'is on hold';
+  if (o.clubbed) return 'is already clubbed';
+  if (o.isClubbedInvoice) return 'is a consolidated (club) order';
+  // Unpaid only — a partially/fully paid order is excluded (partial is NOT treated as unpaid).
+  if ((o.paidAmount || 0) > 0 || (o.status && o.status !== 'UNPAID')) return 'is not unpaid';
+  return null;
+};
+
+/**
+ * GET /api/invoices  — list created-but-uninvoiced, unpaid ORDERS for the Club Invoice UI.
+ * Query: customerId?, companyId?, clubbableOnly=1 (exclude ineligible).
+ */
+export const listInvoices = async (req, res) => {
+  const filter = scopeToOrg({
+    invoiceGenerated: { $ne: true },      // no invoice generated yet
+    cancelled: { $ne: true },
+    isClubbedInvoice: { $ne: true },      // hide consolidated draft orders themselves
+  }, req);
+  if (req.query.customerId) filter.customerId = req.query.customerId;
+  if (req.query.companyId) filter.companyId = req.query.companyId;
+  const rows = await Order.find(filter)
+    .populate('customerId', 'name')
+    .populate('companyId', 'name')
+    .sort({ createdAt: -1 })
+    .lean();
+  const out = rows
+    .map((o) => {
+      const issue = clubbingIssue(o);
+      const svc = (o.services || []).map((s) => s.serviceType).filter(Boolean);
+      return {
+        _id: o._id,
+        orderNo: o.orderNo || '',
+        date: o.createdAt,
+        module: o.module,
+        party: o.customerId?.name || o.companyId?.name || '—',
+        partyKey: partyKeyOf(o),
+        services: svc.join(', ') || '—',
+        serviceCount: svc.length,
+        status: o.status || 'UNPAID',
+        clubbed: !!o.clubbed,
+        clubbedIntoId: o.clubbedIntoId || null,
+        clubbable: !issue,
+        reason: issue,
+      };
+    })
+    .filter((r) => (req.query.clubbableOnly ? r.clubbable : true));
+  res.json(out);
+};
+
+/**
+ * POST /api/invoices/club  { orderIds: [...] }  — club multiple uninvoiced, unpaid orders
+ * of the SAME customer/company into ONE consolidated PACKAGE order. That order is then
+ * invoiced once through the normal invoice-generation screen (amounts entered there, reusing
+ * the existing package pricing/tax/discount calculation) — so no accounting logic is duplicated
+ * and single-invoice generation is untouched. Super-Admin only (see route).
+ *
+ * Integrity: the source orders are locked (`clubbed` + `clubbedIntoId`) so they can't be
+ * invoiced or clubbed again; the lock is re-checked atomically (updateMany with the eligibility
+ * filter) to reject simultaneous/duplicate requests, with a compensating rollback on failure.
+ */
+export const clubInvoices = async (req, res) => {
+  const ids = Array.isArray(req.body?.orderIds) ? [...new Set(req.body.orderIds.map(String))] : [];
+  if (ids.length < 2) return res.status(400).json({ message: 'Select at least two orders to club.' });
+
+  // Load all sources (org-scoped) and validate as a set.
+  const sources = await Order.find(scopeToOrg({ _id: { $in: ids } }, req));
+  if (sources.length !== ids.length) return res.status(400).json({ message: 'One or more selected orders could not be found.' });
+
+  for (const o of sources) {
+    const issue = clubbingIssue(o);
+    if (issue) return res.status(400).json({ message: `Order ${o.orderNo} ${issue} and cannot be clubbed.` });
+  }
+  // All must share the same party (no mixing customers, and no mixing Retail with B2B) and module.
+  const partyKey = partyKeyOf(sources[0]);
+  if (partyKey === 'NONE') return res.status(400).json({ message: 'Selected orders have no customer/company to club under.' });
+  if (!sources.every((o) => partyKeyOf(o) === partyKey)) {
+    return res.status(400).json({ message: 'All selected orders must belong to the same customer or B2B company.' });
+  }
+  const module = sources[0].module;
+  if (!sources.every((o) => o.module === module)) {
+    return res.status(400).json({ message: 'All selected orders must be of the same booking type.' });
+  }
+
+  // Build a consolidated PACKAGE order holding every source service line (no amounts yet —
+  // those are entered when its invoice is generated, exactly like any other package order).
+  const base = sources[0];
+  const consolidated = {
+    module,
+    customerId: base.customerId || undefined,
+    companyId: base.companyId || undefined,
+    requestedByMemberId: base.requestedByMemberId || undefined,
+    isPackage: true,
+    isClubbedInvoice: true,
+    clubbedFromIds: sources.map((o) => o._id),
+    clubbedFromNos: sources.map((o) => o.orderNo).filter(Boolean),
+    invoiceType: base.invoiceType,
+    createdBy: req.user._id,
+    organizationId: base.organizationId || await resolveOrgId(req),
+    services: [],
+    invoiceNotes: `Club invoice of orders: ${sources.map((o) => o.orderNo).filter(Boolean).join(', ')}`,
+  };
+  for (const o of sources) {
+    for (const s of (o.services || [])) {
+      const line = (s.toObject ? s.toObject() : { ...s });
+      delete line._id;
+      line._sourceOrderNo = o.orderNo;       // traceability back to the source order
+      consolidated.services.push(line);
+    }
+  }
+
+  // Persist: create the consolidated order, then lock the sources. The updateMany filter
+  // re-asserts eligibility (still uninvoiced + unclubbed) so concurrent/duplicate submits fail.
+  let created;
+  try {
+    created = await Order.create(consolidated);
+    const stamp = { clubbed: true, clubbedAt: new Date(), clubbedIntoId: created._id };
+    const upd = await Order.updateMany(
+      scopeToOrg({ _id: { $in: sources.map((o) => o._id) }, invoiceGenerated: { $ne: true }, clubbed: { $ne: true } }, req),
+      { $set: stamp },
+    );
+    if (upd.modifiedCount !== sources.length) throw new Error('source-lock-mismatch');
+  } catch (err) {
+    if (created?._id) await Order.deleteOne({ _id: created._id }).catch(() => {});
+    await Order.updateMany({ clubbedIntoId: created?._id }, { $set: { clubbed: false, clubbedAt: null, clubbedIntoId: null } }).catch(() => {});
+    return res.status(409).json({ message: 'Could not club the selected orders — one may have just been invoiced or clubbed. No changes were applied; please refresh and retry.' });
+  }
+
+  await logActivity(req, {
+    action: 'CLUB_ORDERS', module: 'Order', recordId: created._id, recordLabel: created.orderNo,
+    message: `Clubbed ${sources.length} orders into ${created.orderNo} for a single invoice`,
+    meta: { sources: consolidated.clubbedFromNos },
+  });
+  res.status(201).json({
+    message: `Clubbed ${sources.length} orders. Enter the amounts to generate the combined invoice.`,
+    order: { _id: created._id, orderNo: created.orderNo, isPackage: true },
+  });
 };

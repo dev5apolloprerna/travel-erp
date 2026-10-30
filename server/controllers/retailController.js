@@ -11,6 +11,7 @@ import { publicUrl, removeFile } from '../utils/upload.js';
 import { sendCredentialsMail } from '../utils/mailer.js';
 import { logActivity, diffFields } from '../utils/activityLog.js';
 import { ensureCreditNoteForOrder } from '../services/creditNoteService.js';
+import { validateBookingPassengers, extractOrderPassengers } from '../utils/bookingValidation.js';
 
 const genPassword = () => Math.random().toString(36).slice(-8);
 
@@ -122,6 +123,31 @@ export const listOrders = async (req, res) => {
   res.json(orders);
 };
 
+/**
+ * GET /api/retail/customers/:id/latest-passengers?excludeOrder=
+ * v65.1: passengers from this customer's MOST RECENT eligible order (one that has
+ * passengers), for auto-filling a new Retail booking. Org-scoped, staff-only,
+ * single query (no N+1). Returns only the supported passenger fields.
+ */
+export const latestPassengers = async (req, res) => {
+  const filter = scopeToOrg({ module: 'RETAIL', customerId: req.params.id, 'services.passengers.0': { $exists: true } }, req);
+  if (req.query.excludeOrder) filter._id = { $ne: req.query.excludeOrder };
+  // Scan a few most-recent orders (newest first, _id as the tie-breaker) and return
+  // the first that actually has a NAMED passenger.
+  const orders = await Order.find(filter)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(5)
+    .select('orderNo invoiceNo createdAt services.serviceType services.passengers')
+    .lean();
+  for (const o of orders) {
+    const passengers = extractOrderPassengers(o);
+    if (passengers.length) {
+      return res.json({ sourceOrder: { id: o._id, no: o.orderNo || o.invoiceNo || '', date: o.createdAt }, passengers });
+    }
+  }
+  return res.json({ sourceOrder: null, passengers: [] });
+};
+
 export const getOrder = async (req, res) => {
   const order = await Order.findById(req.params.id).populate('customerId');
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
@@ -185,6 +211,10 @@ export const createOrder = async (req, res) => {
     if (err) return res.status(400).json({ message: err });
   }
 
+  // v64: Retail bookings require passenger details (≥1 named passenger per service).
+  const paxErr = validateBookingPassengers(services);
+  if (paxErr) return res.status(400).json({ message: paxErr });
+
   const t = await buildOrderServices(services || [], invoiceType);
 
   const orgId = await resolveOrgId(req);
@@ -213,11 +243,18 @@ export const updateOrder = async (req, res) => {
     return res.status(400).json({ message: 'This order cannot be edited because its invoice has already been generated.' });
   if (order.cancelled)
     return res.status(400).json({ message: 'This order has been cancelled and can no longer be edited.' });
+  if (order.clubbed)
+    return res.status(400).json({ message: 'This order was clubbed into a combined invoice and can no longer be edited.' });
   const { services, invoiceType, isPackage } = req.body;
   const wantPackage = isPackage === undefined ? order.isPackage : !!isPackage;
   if (services && wantPackage) {
     const err = await validatePackage(services);
     if (err) return res.status(400).json({ message: err });
+  }
+  // v64: enforce passenger details on edit too (Retail).
+  if (services) {
+    const paxErr = validateBookingPassengers(services);
+    if (paxErr) return res.status(400).json({ message: paxErr });
   }
   if (services) {
     const t = await buildOrderServices(services, invoiceType || order.invoiceType);
@@ -305,6 +342,9 @@ export const addPayment = async (req, res) => {
   const { amount, mode, type, paidByCustomer } = req.body;
   const order = await Order.findById(req.params.id);
   if (!order || !ownsOrg(order, req)) return res.status(404).json({ message: 'Order not found' });
+  // v65: a clubbed (superseded) invoice no longer carries a receivable — record the payment
+  // against the consolidated invoice instead.
+  if (order.clubbed) return res.status(400).json({ message: 'This invoice was clubbed into a consolidated invoice. Record the payment against the consolidated invoice.' });
 
   const payment = await Payment.create({
     module: 'RETAIL', orderId: order._id, amount, mode, type,
@@ -342,6 +382,8 @@ export const deleteOrder = async (req, res) => {
   // backend so it cannot be bypassed through a direct API call.
   if (existing.invoiceGenerated)
     return res.status(400).json({ message: 'An order with a generated invoice cannot be deleted (kept for audit/reporting).' });
+  if (existing.clubbed)
+    return res.status(400).json({ message: 'This order was clubbed into a combined invoice and cannot be deleted.' });
   if (existing.cancelled)
     return res.status(400).json({ message: 'A cancelled order cannot be deleted (kept for audit/reporting).' });
   await Order.findByIdAndDelete(req.params.id);

@@ -65,6 +65,7 @@ import MemberPortal from './pages/portal/MemberPortal';
 import MainCompanies from './pages/org/MainCompanies';
 import SupplierInvoices from './pages/org/SupplierInvoices';
 import CreditNotes from './pages/invoice/CreditNotes';
+import ClubInvoices from './pages/invoice/ClubInvoices';
 import ActivityLogs from './pages/admin/ActivityLogs';
 import ReportsHub from './pages/reports/ReportsHub';
 import ReportView from './pages/reports/ReportView';
@@ -191,6 +192,7 @@ export default function App() {
         <Route path="org/main-companies" element={<MainCompanies />} />
         <Route path="org/supplier-invoices" element={<SupplierInvoices />} />
         <Route path="invoices/credit-notes" element={<CreditNotes />} />
+        <Route path="invoices/club" element={<SAOnly><ClubInvoices /></SAOnly>} />
         <Route path="activity-logs" element={<ActivityLogs />} />
 
         {/* Reports module (v60) — Super Admin only. See menuConfig/reportRoutes
